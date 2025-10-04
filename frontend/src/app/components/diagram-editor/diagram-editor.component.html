@@ -1,0 +1,172 @@
+<div class="diagram-editor">
+  <!-- Toolbar -->
+  <mat-toolbar color="primary" class="toolbar">
+    <button mat-icon-button matTooltip="Back to Dashboard" (click)="backToDashboard()">
+      <mat-icon>arrow_back</mat-icon>
+    </button>
+    
+    <span>Flouee Diagram Model</span>
+    <span class="spacer"></span>
+    
+    <button mat-icon-button [matMenuTriggerFor]="fileMenu" matTooltip="File">
+      <mat-icon>folder</mat-icon>
+    </button>
+    <mat-menu #fileMenu="matMenu">
+      <button mat-menu-item>
+        <mat-icon>add</mat-icon>
+        <span>New Diagram</span>
+      </button>
+      <button mat-menu-item>
+        <mat-icon>folder_open</mat-icon>
+        <span>Open</span>
+      </button>
+      <button mat-menu-item>
+        <mat-icon>save</mat-icon>
+        <span>Save</span>
+      </button>
+    </mat-menu>
+
+    <button mat-icon-button [matMenuTriggerFor]="editMenu" matTooltip="Edit">
+      <mat-icon>edit</mat-icon>
+    </button>
+    <mat-menu #editMenu="matMenu">
+      <button mat-menu-item (click)="addTable()">
+        <mat-icon>table_chart</mat-icon>
+        <span>Add Table</span>
+      </button>
+      <button mat-menu-item [disabled]="!selectedTable()" (click)="deleteSelectedTable()">
+        <mat-icon>delete</mat-icon>
+        <span>Delete Table</span>
+      </button>
+      <mat-divider></mat-divider>
+      <button mat-menu-item (click)="addRelationship()" [disabled]="tables().length < 2">
+        <mat-icon>timeline</mat-icon>
+        <span>Add Relationship</span>
+      </button>
+    </mat-menu>
+
+        <button mat-icon-button (click)="generateSQL()" matTooltip="Generate SQL">
+          <mat-icon>code</mat-icon>
+        </button>
+        <button mat-icon-button (click)="openViewMode()" matTooltip="View Mode">
+          <mat-icon>visibility</mat-icon>
+        </button>
+    
+    <button mat-icon-button matTooltip="Logout" (click)="logout()">
+      <mat-icon>logout</mat-icon>
+    </button>
+  </mat-toolbar>
+
+  <div class="editor-container">
+    <!-- Sidebar -->
+    <mat-sidenav-container class="sidenav-container">
+      <mat-sidenav mode="side" opened class="sidenav">
+        <mat-nav-list>
+          <h3 mat-subheader>Tables</h3>
+          @for (table of tables(); track table.id) {
+            <mat-list-item 
+              [class.selected]="selectedTable()?.id === table.id"
+              (click)="selectedTable.set(table)">
+              <mat-icon matListItemIcon>table_chart</mat-icon>
+              <span matListItemTitle>{{ table.name }}</span>
+              <span matListItemLine>{{ table.columns.length }} columns</span>
+            </mat-list-item>
+          }
+          
+          @if (tables().length === 0) {
+            <mat-list-item>
+              <span matListItemTitle>No tables yet</span>
+              <span matListItemLine>Click "Add Table" to get started</span>
+            </mat-list-item>
+          }
+        </mat-nav-list>
+      </mat-sidenav>
+
+      <!-- Main content -->
+      <mat-sidenav-content class="main-content">
+        <div class="canvas-container"
+             #canvasContainer
+             (mousedown)="onCanvasMouseDown($event)"
+             (mousemove)="onCanvasMouseMove($event)"
+             (mouseup)="onCanvasMouseUp($event)"
+             (wheel)="onCanvasWheel($event)"
+             (touchstart)="onCanvasTouchStart($event)"
+             (touchmove)="onCanvasTouchMove($event)"
+             (touchend)="onCanvasTouchEnd($event)">
+          
+          <!-- HTML container for table cards -->
+          <div 
+            class="table-cards-container"
+            [style.transform]="canvasTransform()"
+            [style.transform-origin]="'0 0'">
+            
+            <!-- Relationship Lines (behind tables) -->
+            @for (rel of relationships(); track rel.id) {
+              @if (getTableById(rel.fromTableId) && getTableById(rel.toTableId)) {
+                <app-relationship-line
+                  [relationship]="rel"
+                  [fromTable]="getTableById(rel.fromTableId)!"
+                  [toTable]="getTableById(rel.toTableId)!"
+                  [zoomLevel]="canvasGrid.getScale()"
+                  [relationshipDisplayColumn]="getRelationshipDisplayColumnForRelationship(rel.id)"
+                  (relationshipTypeChanged)="onRelationshipTypeChanged($event)"
+                  (relationshipDeleted)="onRelationshipDeleted($event)">
+                </app-relationship-line>
+              }
+            }
+            
+            <!-- Table Cards -->
+            @for (table of tables(); track table.id) {
+              <app-table-card
+                [table]="table"
+                [x]="table.x"
+                [y]="table.y"
+                [zoomLevel]="canvasGrid.getScale()"
+                [isSelected]="selectedTable()?.id === table.id"
+                [relationshipDisplayColumns]="getRelationshipDisplayColumns(table.id)"
+                [allTables]="tables()"
+                (positionChanged)="onTablePositionChanged(table, $event)"
+                (dragPositionChanged)="onTableDragPositionChanged($event)"
+                (tableSelected)="onTableSelected($event)"
+                (tableEdited)="onTableEdited($event)"
+                (tableDeleted)="onTableDeleted($event)"
+                (linkRequested)="onLinkRequested($event)"
+                (relationshipDisplayColumnUpdated)="updateRelationshipDisplayColumnFields($event.displayColumn, $event.newFields)">
+              </app-table-card>
+            }
+          </div>
+          
+          <div class="canvas-overlay">
+            <div class="instructions">
+              <p><strong>Instructions:</strong></p>
+              <p>• Drag to pan around the canvas</p>
+              <p>• Mouse wheel to zoom in/out</p>
+              <p>• Click + button to add table</p>
+              <p>• Double-click table to edit</p>
+            </div>
+            
+            <button mat-fab 
+                    color="primary" 
+                    class="add-table-button"
+                    (click)="addTable()"
+                    matTooltip="Add New Table">
+              <mat-icon>add</mat-icon>
+            </button>
+            
+            <!-- Test Error Button -->
+            <button mat-fab 
+                    color="warn" 
+                    class="test-error-button"
+                    (click)="testErrorNotification()"
+                    matTooltip="Test Error Notification">
+              <mat-icon>error</mat-icon>
+            </button>
+          </div>
+        </div>
+      </mat-sidenav-content>
+    </mat-sidenav-container>
+  </div>
+  
+  <!-- Notifications -->
+  <app-notification></app-notification>
+</div>

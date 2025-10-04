@@ -1,0 +1,31 @@
+{
+  "name": "flouee-diagram-model",
+  "version": "1.0.0",
+  "description": "A visual database schema designer for Supabase",
+  "main": "index.js",
+  "scripts": {
+    "migrate": "node scripts/apply-migrations.js",
+    "deploy-functions": "npx supabase functions deploy",
+    "start": "npx supabase start",
+    "stop": "npx supabase stop",
+    "reset": "npx supabase db reset",
+    "test-functions": "node scripts/test-functions.js",
+    "test-new-arch": "node scripts/test-new-architecture.js",
+    "setup-sql": "node scripts/sql-to-clipboard.js"
+  },
+  "keywords": [
+    "supabase",
+    "database",
+    "schema",
+    "diagram",
+    "visual"
+  ],
+  "author": "Flouee Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

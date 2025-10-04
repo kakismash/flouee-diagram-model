@@ -1,0 +1,2377 @@
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, effect, HostListener, ElementRef, ViewChild } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MatTableModule } from '@angular/material/table';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+
+import { Table, Relationship, RelationshipDisplayColumn } from '../../models/table.model';
+import { TableView, ColumnViewSetting } from '../../models/table-view.model';
+import { TableViewService } from '../../services/table-view.service';
+import { DataSimulationService } from '../../services/data-simulation.service';
+import { ViewConfigDialogComponent } from '../view-config-dialog/view-config-dialog.component';
+import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
+import { ModernInputComponent } from '../modern-input/modern-input.component';
+
+export interface DataChangeEvent {
+  type: 'CREATE' | 'UPDATE' | 'DELETE' | 'SCHEMA_UPDATE';
+  table: string;
+  data: any;
+  id?: string;
+  schemaUpdate?: any;
+}
+
+@Component({
+  selector: 'app-table-view',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatTableModule,
+    MatCardModule,
+    MatButtonModule,
+    MatIconModule,
+    MatChipsModule,
+    MatTooltipModule,
+    MatDialogModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatSelectModule,
+    MatCheckboxModule,
+    MatSnackBarModule,
+    MatPaginatorModule,
+    ReactiveFormsModule,
+    DragDropModule,
+    ModernInputComponent
+  ],
+  template: `
+    <div class="table-view-container" #tableContainer>
+      <!-- Table Header -->
+      <mat-card class="table-header">
+        <mat-card-header>
+          <div class="header-content">
+            <div class="header-left">
+              <mat-icon>table_chart</mat-icon>
+              <div>
+                <mat-card-title>{{ table.name }}</mat-card-title>
+                <mat-card-subtitle>{{ data.length }} records</mat-card-subtitle>
+              </div>
+            </div>
+            <div class="header-right">
+              <div class="pagination-info">
+                Showing {{ getDisplayedRange() }} of {{ totalRecords }} records
+              </div>
+            </div>
+          </div>
+        </mat-card-header>
+      </mat-card>
+
+
+      <!-- Table Content -->
+      <mat-card class="table-content" id="table-{{table.id}}">
+        <!-- Floating Elements positioned relative to the table -->
+        <div class="floating-elements-container">
+          <!-- Floating selection info -->
+          <div class="floating-selection-info" *ngIf="getSelectedCount() > 0">
+            <div class="selection-chip">
+              <mat-icon>checklist</mat-icon>
+              <span class="selection-text">{{ getSelectedCount() }} selected</span>
+              <button mat-icon-button 
+                      (click)="deleteSelectedRows()" 
+                      matTooltip="Delete Selected"
+                      class="delete-selected-btn">
+                <mat-icon>delete</mat-icon>
+              </button>
+              <button mat-icon-button 
+                      (click)="clearSelection()" 
+                      matTooltip="Clear Selection"
+                      class="clear-selected-btn">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <!-- Floating Add Row Button -->
+          <button mat-fab 
+                  color="primary" 
+                  (click)="addRecord()" 
+                  matTooltip="Add New Row"
+                  class="floating-add-btn">
+            <mat-icon>add</mat-icon>
+          </button>
+
+          <!-- Floating View Manager Button -->
+          <button mat-fab 
+                  color="primary" 
+                  (click)="openViewManager()" 
+                  matTooltip="Manage Views"
+                  class="floating-view-btn">
+            <mat-icon>view_module</mat-icon>
+          </button>
+        </div>
+        <!-- Single Table with Sticky Headers -->
+        <div class="table-wrapper">
+          <div class="table-container" 
+               [class.multiselect-active]="isMultiSelectMode()"
+               cdkDropList="table-columns" 
+               cdkDropListOrientation="horizontal"
+               (cdkDropListDropped)="onColumnDrop($event)">
+            <table mat-table [dataSource]="paginatedData" class="data-table">
+            <!-- Regular Columns -->
+
+            <ng-container *ngFor="let column of regularColumns" [matColumnDef]="'reg_' + column.name">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                <div class="column-header" 
+                     cdkDrag 
+                     [cdkDragDisabled]="!activeView"
+                     [matTooltip]="activeView ? 'Drag to reorder column' : 'No view selected'"
+                     matTooltipPosition="below">
+                    <div class="column-header-content">
+                      <div class="column-info">
+                        <span *ngIf="!isEditingColumnName(column.id)" 
+                              class="column-name-editable"
+                              (click)="startEditColumnName(column.id, column.name)">
+                          {{ column.name }}
+                        </span>
+                        <app-modern-input *ngIf="isEditingColumnName(column.id)"
+                                          [config]="{
+                                            size: 'small',
+                                            variant: 'outline',
+                                            placeholder: 'Column name',
+                                            maxLength: 50,
+                                            required: true
+                                          }"
+                                          [value]="editingColumnNameValue()"
+                                          (valueChange)="updateEditingColumnNameValue($event)"
+                                          (enter)="saveColumnName(column.id)"
+                                          (escape)="cancelEditColumnName()"
+                                          class="column-name-input">
+                        </app-modern-input>
+                        <div class="column-badges">
+                          <mat-chip *ngIf="column.isPrimaryKey" class="badge pk">PK</mat-chip>
+                          <mat-chip *ngIf="column.isForeignKey" class="badge fk">FK</mat-chip>
+                          <mat-chip *ngIf="column.isUnique" class="badge unique">UQ</mat-chip>
+                          <mat-chip *ngIf="column.isAutoIncrement" class="badge ai">AI</mat-chip>
+                        </div>
+                      </div>
+                    </div>
+                </div>
+              </th>
+              <td mat-cell *matCellDef="let element; let i = index">
+                <div class="cell-content" 
+                     [class.editing]="isEditing(i, 'reg_' + column.name)"
+                     (click)="startEdit(i, 'reg_' + column.name, element[column.name])">
+                  
+                  <!-- Display Mode -->
+                  <span *ngIf="!isEditing(i, 'reg_' + column.name)" 
+                        [class.primary-key]="column.isPrimaryKey"
+                        [class.editable]="!column.isAutoIncrement">
+                    {{ formatCellValue(element[column.name], column) }}
+                  </span>
+                  
+                  <!-- Edit Mode -->
+                  <div *ngIf="isEditing(i, 'reg_' + column.name)" class="edit-cell">
+                    <app-modern-input
+                      [config]="{
+                        size: 'small',
+                        variant: 'outline',
+                        placeholder: 'Enter value',
+                        maxLength: 255
+                      }"
+                      [value]="editingValue()"
+                      (valueChange)="updateEditingValue($event)"
+                      (enter)="saveEdit(i, 'reg_' + column.name, element)"
+                      (escape)="cancelEdit()"
+                      class="cell-edit-input">
+                    </app-modern-input>
+                  </div>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Relationship Display Columns - Each field as separate column -->
+            <ng-container *ngFor="let relCol of relationshipDisplayColumns; let relIndex = index">
+              <ng-container *ngFor="let field of relCol.fields; let fieldIndex = index" 
+                           [matColumnDef]="'rel_' + relCol.id + '_' + fieldIndex">
+                <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                  <div class="column-header relationship-header" 
+                       cdkDrag 
+                       [cdkDragDisabled]="!activeView"
+                       [matTooltip]="activeView ? 'Drag to reorder relationship column' : 'No view selected'"
+                       matTooltipPosition="below">
+                    <div class="column-header-content">
+                      <div class="column-info">
+                        <div class="relationship-info">
+                          <mat-icon>link</mat-icon>
+                          <span class="source-table">{{ getSourceTableName(relCol.sourceTableId) }}</span>
+                          <span class="field-name">{{ field.displayName }}</span>
+                          <mat-chip class="badge rel">REL</mat-chip>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </th>
+                <td mat-cell *matCellDef="let element; let i = index">
+                  <div class="cell-content relationship-cell" 
+                       [class.editing]="isEditingRelationship(i, relCol.id, fieldIndex)"
+                       (click)="startEditRelationship(i, relCol, field, element)">
+                    
+                    <!-- Display Mode -->
+                    <span *ngIf="!isEditingRelationship(i, relCol.id, fieldIndex)" 
+                          class="relationship-value editable">
+                      {{ getRelationshipValue(element, relCol, field) }}
+                    </span>
+                    
+                    <!-- Edit Mode -->
+                    <div *ngIf="isEditingRelationship(i, relCol.id, fieldIndex)" class="edit-cell">
+                      <mat-form-field appearance="outline" class="inline-field">
+                        <mat-select [value]="editingValue()"
+                                    (blur)="saveEditRelationship(i, relCol, field, element)"
+                                    (selectionChange)="updateEditingValue($event)">
+                          <mat-option *ngFor="let option of getRelationshipOptions(relCol)" [value]="option.value">
+                            {{ option.label }}
+                          </mat-option>
+                        </mat-select>
+                      </mat-form-field>
+                    </div>
+                  </div>
+                </td>
+              </ng-container>
+            </ng-container>
+
+            <!-- Simple Relationship Columns -->
+            <ng-container *ngFor="let rel of relationships" [matColumnDef]="rel.name || 'rel_' + rel.id">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                <div class="column-header">
+                  <span class="column-name">{{ rel.name || 'rel_' + rel.id }}</span>
+                </div>
+              </th>
+              <td mat-cell *matCellDef="let row; let i = index" 
+                  [class.editing]="editingCell()?.row === i && editingCell()?.column === (rel.name || 'rel_' + rel.id)"
+                  (click)="startEditSimpleRelationship(i, rel.name || 'rel_' + rel.id, row[rel.name || 'rel_' + rel.id], rel)">
+                <div class="cell-content">
+                  <div *ngIf="editingCell()?.row !== i || editingCell()?.column !== (rel.name || 'rel_' + rel.id)" 
+                       class="relationship-value">
+                    <span *ngIf="rel.displayColumnId; else singleValue">
+                      {{ getRelationshipDisplayValue(row[rel.name || 'rel_' + rel.id], rel) }}
+                    </span>
+                    <ng-template #singleValue>
+                      {{ row[rel.name || 'rel_' + rel.id] || '-' }}
+                    </ng-template>
+                  </div>
+                  <mat-form-field *ngIf="editingCell()?.row === i && editingCell()?.column === (rel.name || 'rel_' + rel.id)" 
+                                  appearance="outline" class="relationship-field">
+                    <mat-select [value]="editingValue()" 
+                                (selectionChange)="editingValue.set($event.value)"
+                                (blur)="saveEdit(i, rel.name || 'rel_' + rel.id)"
+                                (keydown.escape)="cancelEdit()">
+                      <mat-option *ngFor="let option of getSimpleRelationshipOptions(rel)" 
+                                  [value]="option.value">
+                        {{ option.label }}
+                      </mat-option>
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Actions Column -->
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                <div class="column-header">
+                  <span class="column-name">Actions</span>
+                </div>
+              </th>
+              <td mat-cell *matCellDef="let row; let i = index">
+                <div class="actions-cell">
+                  <button mat-icon-button 
+                          (click)="deleteRow(i)" 
+                          matTooltip="Delete Row"
+                          class="delete-btn">
+                    <mat-icon>delete</mat-icon>
+                  </button>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Multi-select Column -->
+            <ng-container matColumnDef="multiselect" *ngIf="isMultiSelectMode()">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                <div class="column-header">
+                  <span class="column-name">Select</span>
+                </div>
+              </th>
+              <td mat-cell *matCellDef="let row; let i = index">
+                <div class="multiselect-cell">
+                  <mat-checkbox 
+                    [checked]="isRowSelected(i)"
+                    (change)="toggleRowSelection(i)">
+                  </mat-checkbox>
+                </div>
+              </td>
+            </ng-container>
+
+            <!-- Custom View Columns -->
+            <ng-container *ngFor="let viewColumn of activeView?.columnSettings" [matColumnDef]="'view_' + viewColumn.columnName">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header">
+                <div class="column-header">
+                  <span class="column-name">{{ viewColumn.columnName }}</span>
+                </div>
+              </th>
+              <td mat-cell *matCellDef="let row; let i = index" 
+                  [class.editing]="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnName)"
+                  (click)="startEdit(i, 'view_' + viewColumn.columnName, row[viewColumn.columnName])">
+                <div class="cell-content">
+                  <span *ngIf="editingCell()?.row !== i || editingCell()?.column !== ('view_' + viewColumn.columnName)">
+                    {{ row[viewColumn.columnName] || '-' }}
+                  </span>
+                  <app-modern-input 
+                    *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnName)"
+                    [value]="editingValue()"
+                    (valueChange)="editingValue.set($event)"
+                    (blur)="saveEdit(i, 'view_' + viewColumn.columnName)"
+                    (keydown.enter)="saveEdit(i, 'view_' + viewColumn.columnName)"
+                    (keydown.escape)="cancelEdit()"
+                    [config]="{
+                      size: 'small',
+                      variant: 'outline',
+                      placeholder: 'Enter value',
+                    }"
+                    class="cell-input">
+                  </app-modern-input>
+                </div>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns" class="sticky-header-row"></tr>
+            
+            <!-- Table Body Rows -->
+            <tr mat-row *matRowDef="let row; columns: displayedColumns; let i = index" 
+                [class.selected]="isMultiSelectMode() && isRowSelected(i)"
+                (click)="onRowClick(i, $event)"></tr>
+          </table>
+          </div>
+        </div>
+
+        <!-- Scrollable Table Content -->
+        <div class="scrollable-table-content">
+          <div class="table-content-container" 
+               [class.multiselect-active]="isMultiSelectMode()">
+            <!-- Table body content is now in the main table above -->
+          </div>
+        </div>
+        
+        <!-- Pagination -->
+        <mat-paginator 
+          [length]="totalRecords"
+          [pageSize]="pageSize"
+          [pageSizeOptions]="[10, 25, 50, 100]"
+          [showFirstLastButtons]="true"
+          (page)="onPageChange($event)"
+          class="table-paginator">
+        </mat-paginator>
+      </mat-card>
+
+      <!-- Relationships Info -->
+      <mat-card class="relationships-info" *ngIf="relationships.length > 0">
+        <mat-card-header>
+          <mat-card-title>Relationships</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="relationships-list">
+            <div *ngFor="let rel of relationships" class="relationship-item">
+              <div class="relationship-info">
+                <mat-icon>link</mat-icon>
+                <span>{{ getRelationshipDescription(rel) }}</span>
+                <mat-chip [class]="'relationship-type-' + rel.type">{{ rel.type }}</mat-chip>
+              </div>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
+    </div>
+  `,
+  styles: [`
+    .table-view-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: var(--theme-background);
+      color: var(--theme-text-primary);
+    }
+
+    .table-header .header-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .header-left mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: var(--theme-primary);
+    }
+
+    .table-content {
+      overflow: hidden;
+      background: var(--theme-background-paper);
+      border: 1px solid var(--theme-border);
+      position: relative;
+    }
+
+    /* Sticky Table Headers */
+    .sticky-header {
+      position: sticky !important;
+      top: 0 !important;
+      z-index: 1000 !important;
+      background: var(--theme-surface) !important;
+      border-bottom: 1px solid var(--theme-outline) !important;
+    }
+
+    .sticky-header-row {
+      position: sticky !important;
+      top: 0 !important;
+      z-index: 1000 !important;
+      background: var(--theme-surface) !important;
+    }
+
+    /* Floating Elements Container */
+    .floating-elements-container {
+      position: sticky;
+      top: 60px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: flex-start;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 1001;
+      margin-bottom: 20px;
+      gap: 12px;
+    }
+
+    .floating-elements-container > * {
+      pointer-events: auto;
+    }
+
+    /* Floating Selection Info */
+    .floating-selection-info {
+      position: absolute;
+      top: 0;
+      right: 0;
+      z-index: 1002;
+    }
+
+    /* Floating Action Buttons */
+    .floating-add-btn {
+      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
+      color: var(--theme-on-primary-container);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+      border: 2px solid var(--theme-primary);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+      width: 56px;
+      height: 56px;
+      backdrop-filter: blur(10px);
+    }
+
+    .floating-add-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .floating-add-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .floating-add-btn mat-icon {
+      position: relative;
+      z-index: 1;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: var(--theme-on-primary-container);
+    }
+
+    .floating-view-btn {
+      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
+      color: var(--theme-on-primary-container);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+      border: 2px solid var(--theme-primary);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+      width: 56px;
+      height: 56px;
+      backdrop-filter: blur(10px);
+    }
+
+    .floating-view-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .floating-view-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .floating-view-btn mat-icon {
+      position: relative;
+      z-index: 1;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: var(--theme-on-primary-container);
+    }
+
+    /* Scrollable Table Content */
+    .scrollable-table-content {
+      max-height: 60vh;
+      overflow-y: auto;
+      overflow-x: auto;
+    }
+
+    .table-content-container {
+      width: 100%;
+      position: relative;
+    }
+
+    .table-content-container.cdk-drop-list-dragging {
+      cursor: grabbing;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      position: relative;
+    }
+
+
+    .selection-chip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
+      color: var(--theme-on-primary-container);
+      padding: 12px 20px;
+      border-radius: 25px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+      border: 2px solid var(--theme-primary);
+      pointer-events: auto;
+      animation: slideDown 0.3s ease-out;
+      backdrop-filter: blur(10px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .selection-chip::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      border-radius: 25px;
+      pointer-events: none;
+    }
+
+    .selection-chip mat-icon:first-child {
+      color: var(--theme-on-primary-container);
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .selection-text {
+      font-weight: 600;
+      font-size: 14px;
+      white-space: nowrap;
+      position: relative;
+      z-index: 1;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    }
+
+    .delete-selected-btn {
+      color: var(--theme-error);
+      margin-left: 6px;
+      position: relative;
+      z-index: 1;
+      border-radius: 50%;
+      transition: all 0.2s ease;
+    }
+
+    .delete-selected-btn:hover {
+      background-color: var(--theme-error-container);
+      color: var(--theme-on-error-container);
+      transform: scale(1.1);
+    }
+
+    .delete-selected-btn mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .clear-selected-btn {
+      color: var(--theme-on-primary-container);
+      margin-left: 6px;
+      position: relative;
+      z-index: 1;
+      border-radius: 50%;
+      transition: all 0.2s ease;
+    }
+
+    .clear-selected-btn:hover {
+      background-color: rgba(255, 255, 255, 0.2);
+      color: var(--theme-on-primary-container);
+      transform: scale(1.1);
+    }
+
+    .clear-selected-btn mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-15px) scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .table-container {
+      width: 100%;
+      position: relative;
+    }
+
+    .table-container.cdk-drop-list-dragging {
+      cursor: grabbing;
+    }
+
+    .data-table {
+      width: 100%;
+      min-width: 600px;
+      background: var(--theme-table-row);
+      table-layout: auto;
+    }
+
+    /* Responsive column widths - more flexible */
+    .data-table th,
+    .data-table td {
+      padding: 8px 12px;
+    }
+
+    .column-header {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      color: var(--theme-text-primary);
+      position: relative;
+      cursor: grab;
+      border: 2px solid transparent;
+      transition: all 0.2s ease;
+      min-height: 40px;
+    }
+
+    .column-header:hover {
+      background-color: var(--theme-table-row-hover);
+      border-color: var(--theme-primary);
+    }
+
+    .column-header:active {
+      cursor: grabbing;
+    }
+
+    .column-header.cdk-drag-preview {
+      box-shadow: 0 4px 12px var(--theme-card-shadow);
+      transform: rotate(2deg);
+      background: var(--theme-surface);
+      border: 2px solid var(--theme-primary);
+      opacity: 0.9;
+    }
+
+    .column-header.cdk-drag-placeholder {
+      opacity: 0.3;
+      background: var(--theme-surface-variant);
+      border: 2px dashed var(--theme-primary);
+    }
+
+    .column-header.cdk-drag-animating {
+      transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+    }
+
+    .column-header.cdk-drag-disabled {
+      cursor: default;
+    }
+
+    .column-header.cdk-drag-disabled:hover {
+      border-color: transparent;
+    }
+
+    .relationship-header {
+      background-color: var(--theme-surface-variant);
+      border-left: 3px solid var(--theme-primary);
+    }
+
+    .relationship-header:hover {
+      background-color: var(--theme-table-row-hover);
+      border-left-color: var(--theme-primary);
+    }
+
+    .relationship-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .relationship-info .source-table {
+      font-weight: 500;
+      color: var(--theme-primary);
+      font-size: 0.8em;
+    }
+
+    .relationship-info .field-name {
+      font-weight: 600;
+      color: var(--theme-text-primary);
+    }
+
+    .column-name-editable {
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
+      transition: all 0.2s ease;
+    }
+
+    .column-name-editable:hover {
+      background-color: var(--theme-surface-variant);
+      color: var(--theme-primary);
+    }
+
+    .column-name-field {
+      min-width: 120px;
+      max-width: 200px;
+    }
+
+    .column-name-field .mat-mdc-form-field-wrapper {
+      padding-bottom: 0;
+    }
+
+    .column-name-field .mat-mdc-form-field-infix {
+      padding: 8px 0;
+      border-top: none;
+    }
+
+    .column-name-field .mat-mdc-text-field-wrapper {
+      padding: 0;
+    }
+
+    /* Modern input styles */
+    .column-name-input {
+      min-width: 80px;
+      max-width: 300px;
+    }
+
+    .cell-edit-input {
+      min-width: 80px;
+      max-width: 200px;
+    }
+
+    .edit-cell {
+      width: 100%;
+      display: flex;
+      align-items: center;
+    }
+
+    /* Multi-select styles */
+    .multi-select-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-right: 16px;
+    }
+
+    .selected-count {
+      background-color: var(--theme-primary);
+      color: var(--theme-on-primary);
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .normal-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .delete-button {
+      color: var(--theme-error) !important;
+    }
+
+    .delete-button:hover {
+      background-color: var(--theme-error-container) !important;
+    }
+
+    .exit-multiselect {
+      color: var(--theme-error);
+    }
+
+    .exit-multiselect:hover {
+      background-color: var(--theme-error-container);
+    }
+
+    .multiselect-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background-color: var(--theme-primary-container);
+      color: var(--theme-on-primary-container);
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .multiselect-info mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+
+
+    /* Row selection styles */
+    .data-table tr {
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .data-table tr.selected {
+      background-color: var(--theme-primary-container) !important;
+      color: var(--theme-on-primary-container) !important;
+      box-shadow: inset 0 0 0 2px var(--theme-primary);
+    }
+
+    .data-table tr.selected:hover {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-on-primary) !important;
+      box-shadow: inset 0 0 0 2px var(--theme-primary);
+    }
+
+    /* Ensure selected rows maintain their color even after hover */
+    .data-table tr.selected:not(:hover) {
+      background-color: var(--theme-primary-container) !important;
+      color: var(--theme-on-primary-container) !important;
+      box-shadow: inset 0 0 0 2px var(--theme-primary);
+    }
+
+    .data-table tr.selected td {
+      background-color: transparent !important;
+      color: inherit !important;
+    }
+
+    .data-table tr.selected .cell-content {
+      color: inherit !important;
+    }
+
+    .data-table tr.selected .column-name-editable {
+      color: inherit !important;
+    }
+
+    .data-table tr.selected .relationship-value {
+      color: inherit !important;
+    }
+
+    .data-table tr.selected .badge {
+      background-color: var(--theme-on-primary-container) !important;
+      color: var(--theme-primary-container) !important;
+    }
+
+    /* Override Material Design table row styles */
+    .data-table tr.selected.mat-row {
+      background-color: var(--theme-primary-container) !important;
+      color: var(--theme-on-primary-container) !important;
+    }
+
+    .data-table tr.selected.mat-row:hover {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-on-primary) !important;
+    }
+
+    /* Ensure Material Design doesn't override our styles */
+    .data-table tr.selected.mat-row:not(:hover) {
+      background-color: var(--theme-primary-container) !important;
+      color: var(--theme-on-primary-container) !important;
+    }
+
+    /* Checkbox styles for selected rows */
+    .data-table tr.selected ::ng-deep .mat-mdc-checkbox {
+      --mdc-checkbox-selected-checkmark-color: var(--theme-on-primary-container);
+      --mdc-checkbox-selected-focus-icon-color: var(--theme-on-primary-container);
+      --mdc-checkbox-selected-hover-icon-color: var(--theme-on-primary-container);
+      --mdc-checkbox-selected-icon-color: var(--theme-on-primary-container);
+      --mdc-checkbox-selected-pressed-icon-color: var(--theme-on-primary-container);
+    }
+
+    .data-table tr.selected ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled:checked ~ .mdc-checkbox__background {
+      background-color: var(--theme-on-primary-container);
+      border-color: var(--theme-on-primary-container);
+    }
+
+    .data-table tr.selected ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled:indeterminate ~ .mdc-checkbox__background {
+      background-color: var(--theme-on-primary-container);
+      border-color: var(--theme-on-primary-container);
+    }
+
+    /* Multi-select mode table styling */
+    .table-container.multiselect-active {
+      border: 2px solid var(--theme-primary);
+      border-radius: 8px;
+      background-color: var(--theme-surface-variant);
+    }
+
+    .table-container.multiselect-active .data-table {
+      background-color: var(--theme-background-paper);
+    }
+
+    .column-header-content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 4px;
+      flex: 1;
+    }
+
+    .column-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+
+    .column-badges {
+      display: flex;
+      gap: 2px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-size: 10px;
+      height: 16px;
+      line-height: 16px;
+    }
+
+    .badge.pk {
+      background: var(--theme-success);
+      color: white;
+    }
+
+    .badge.fk {
+      background: var(--theme-warning);
+      color: white;
+    }
+
+    .badge.unique {
+      background: var(--theme-info);
+      color: white;
+    }
+
+    .badge.ai {
+      background: var(--theme-secondary);
+      color: white;
+    }
+
+    .badge.rel {
+      background: var(--theme-primary);
+      color: white;
+    }
+
+    .cell-content {
+      padding: 4px 8px;
+      color: var(--theme-text-primary);
+      border-radius: 4px;
+      transition: background-color 0.2s ease;
+    }
+
+    .primary-key {
+      font-weight: bold;
+      color: var(--theme-success);
+    }
+
+    .relationship-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .relationship-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .relationship-field {
+      display: flex;
+      gap: 4px;
+      font-size: 12px;
+    }
+
+    .field-name {
+      font-weight: 500;
+      color: var(--theme-text-secondary);
+    }
+
+    .field-value {
+      color: var(--theme-primary);
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .relationships-info {
+      margin-top: 16px;
+      background: var(--theme-card-background);
+      border: 1px solid var(--theme-card-border);
+    }
+
+    .relationships-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .relationship-item {
+      padding: 8px;
+      background: var(--theme-surface-variant);
+      border-radius: 4px;
+    }
+
+    .relationship-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--theme-text-primary);
+    }
+
+    .relationship-type-one-to-one {
+      background: var(--theme-success);
+      color: white;
+    }
+
+    .relationship-type-one-to-many {
+      background: var(--theme-warning);
+      color: white;
+    }
+
+    .relationship-type-many-to-many {
+      background: var(--theme-info);
+      color: white;
+    }
+
+    /* Inline editing styles */
+    .cell-content {
+      position: relative;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+    }
+
+    .cell-content.editable {
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background-color 0.2s;
+    }
+
+    .cell-content.editable:hover {
+      background-color: var(--theme-table-row-hover);
+      border-radius: 4px;
+    }
+
+    .cell-content.editing {
+      background-color: var(--theme-table-row-selected);
+    }
+
+    .edit-cell {
+      width: 100%;
+    }
+
+    .inline-field {
+      width: 100%;
+    }
+
+    .inline-field .mat-mdc-form-field-wrapper {
+      padding: 0;
+    }
+
+    .inline-field .mat-mdc-form-field-infix {
+      border: none;
+      padding: 0;
+    }
+
+    .inline-field input,
+    .inline-field .mat-mdc-select {
+      font-size: 14px;
+      padding: 4px 8px;
+      color: var(--theme-input-text);
+      background: var(--theme-input-background);
+    }
+
+    /* Relationship column styles */
+    .relationship-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .source-table {
+      font-size: 10px;
+      color: var(--theme-text-secondary);
+      font-weight: 500;
+    }
+
+    .relationship-header .field-name {
+      font-weight: 500;
+      color: var(--theme-text-primary);
+    }
+
+    .relationship-cell {
+      background-color: var(--theme-surface-variant);
+      border-left: 3px solid var(--theme-primary);
+      padding: 4px 8px;
+    }
+
+    .relationship-value {
+      color: var(--theme-primary);
+      font-weight: 500;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: background-color 0.2s ease;
+    }
+
+    .relationship-value.editable {
+      cursor: pointer;
+    }
+
+    .relationship-value.editable:hover {
+      background-color: var(--theme-table-row-selected);
+      border-radius: 4px;
+    }
+
+    .pagination-info {
+      display: flex;
+      align-items: center;
+      margin-right: 16px;
+      font-size: 14px;
+      color: var(--theme-text-primary);
+      font-weight: 500;
+    }
+
+    .table-paginator {
+      border-top: 1px solid var(--theme-divider);
+      background-color: var(--theme-surface-variant);
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-paginator-range-label {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-paginator-page-size-label {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-paginator-icon {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-button {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-button:disabled {
+      color: var(--theme-text-disabled);
+    }
+
+    .table-paginator .mat-mdc-select {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-select-value {
+      color: var(--theme-text-primary);
+    }
+
+    .table-paginator .mat-mdc-select-arrow {
+      color: var(--theme-text-primary);
+    }
+
+    /* Override Material Design paginator styles */
+    ::ng-deep .table-paginator .mat-mdc-paginator-container {
+      background-color: var(--theme-surface-variant);
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-paginator-range-label {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-paginator-page-size-label {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-paginator-icon {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-button {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-button:disabled {
+      color: var(--theme-text-disabled) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-select {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-select-value {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .table-paginator .mat-mdc-select-arrow {
+      color: var(--theme-text-primary) !important;
+    }
+
+    /* Floating Action Buttons */
+    .floating-add-btn {
+      background: linear-gradient(135deg, var(--theme-primary) 0%, var(--theme-primary-variant) 100%);
+      color: var(--theme-on-primary);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+      border: 2px solid var(--theme-primary);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .floating-add-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .floating-add-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .floating-add-btn mat-icon {
+      position: relative;
+      z-index: 1;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: var(--theme-on-primary-container);
+    }
+
+    .floating-view-btn {
+      background: linear-gradient(135deg, var(--theme-primary) 0%, var(--theme-primary-variant) 100%);
+      color: var(--theme-on-primary);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+      border: 2px solid var(--theme-primary);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .floating-view-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .floating-view-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .floating-view-btn mat-icon {
+      position: relative;
+      z-index: 1;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: var(--theme-on-primary-container);
+    }
+  `]
+})
+export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
+  @Input() table!: Table;
+  @Input() data: any[] = [];
+  @Input() relationships: Relationship[] = [];
+  @Input() relationshipDisplayColumns: RelationshipDisplayColumn[] = [];
+  @Input() allTables: Table[] = [];
+  @Input() allTableData: { [tableName: string]: any[] } = {};
+  @Input() views: TableView[] = [];
+  @Input() activeView: TableView | null = null;
+
+  @Output() dataChanged = new EventEmitter<DataChangeEvent>();
+  @Output() viewSelected = new EventEmitter<TableView>();
+  @Output() viewCreated = new EventEmitter<TableView>();
+  @Output() viewUpdated = new EventEmitter<TableView>();
+  @Output() viewDeleted = new EventEmitter<string>();
+
+  @ViewChild('tableContainer', { static: false }) tableContainer!: ElementRef;
+
+  displayedColumns: string[] = [];
+  regularColumns: any[] = [];
+
+  // Editing state
+  editingCell = signal<{row: number, column: string} | null>(null);
+  editingValue = signal<string>('');
+
+  // Column name editing state
+  editingColumnName = signal<string | null>(null);
+  editingColumnNameValue = signal<string>('');
+
+  // Multi-select state
+  selectedRows = signal<Set<number>>(new Set());
+
+  isMultiSelectMode = signal<boolean>(false);
+  isCtrlPressed = signal<boolean>(false);
+  
+  // Pagination properties
+  pageSize = 25;
+  currentPage = 0;
+  totalRecords = 0;
+  paginatedData: any[] = [];
+
+  // Cache for relationship values to prevent infinite loops
+  private relationshipValueCache = new Map<string, string>();
+  private relationshipOptionsCache = new Map<string, { value: string; label: string }[]>();
+
+  constructor(
+    private dialog: MatDialog,
+    private fb: FormBuilder,
+    private snackBar: MatSnackBar,
+    private tableViewService: TableViewService,
+    private dataSimulationService: DataSimulationService
+  ) {
+  }
+
+  ngOnInit() {
+    this.setupColumns();
+    this.updatePagination();
+  }
+
+  ngOnDestroy() {
+    // Clean up any resources if needed
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['data']) {
+      this.updatePagination();
+    }
+    if (changes['activeView']) {
+      this.setupColumns();
+    }
+    
+    // Clear cache when data changes to prevent stale data
+    if (changes['data'] || changes['allTableData']) {
+      this.clearRelationshipCache();
+    }
+  }
+
+  private setupColumns() {
+    // Apply active view if available
+    let visibleColumns = this.table.columns;
+    if (this.activeView) {
+      visibleColumns = this.tableViewService.applyView(this.table, this.activeView);
+    }
+
+    // Regular columns (non-relationship) - apply view filter
+    this.regularColumns = visibleColumns.filter(col => 
+      !col.isSystemGenerated && !col.isForeignKey
+    );
+    
+    // Relationship display columns - each field as separate column
+    const relationshipDisplayColumns: string[] = [];
+    this.relationshipDisplayColumns.forEach(relCol => {
+      relCol.fields.forEach((field, fieldIndex) => {
+        if (field.isVisible) {
+          relationshipDisplayColumns.push(`rel_${relCol.id}_${fieldIndex}`);
+        }
+      });
+    });
+    
+    // Simple relationship columns
+    const simpleRelationshipColumns: string[] = [];
+    this.relationships.forEach(rel => {
+      const columnName = rel.name || `rel_${rel.id}`;
+      simpleRelationshipColumns.push(columnName);
+    });
+    
+    // Custom view columns - only add if they don't duplicate regular columns
+    const customViewColumns: string[] = [];
+    if (this.activeView?.columnSettings) {
+      this.activeView.columnSettings.forEach(viewColumn => {
+        // Only add custom view columns that don't duplicate regular columns
+        const isDuplicate = this.regularColumns.some(regCol => regCol.name === viewColumn.columnName);
+        if (!isDuplicate) {
+          customViewColumns.push(viewColumn.columnName);
+        }
+      });
+    }
+    
+    // Combine all columns with unique names and prefixes
+    const allColumns = [
+      ...this.regularColumns.map(col => 'reg_' + col.name),
+      ...relationshipDisplayColumns,
+      ...simpleRelationshipColumns,
+      ...customViewColumns.map(col => 'view_' + col)
+    ];
+    
+    // Remove duplicates and add system columns
+    this.displayedColumns = [
+      ...new Set(allColumns), // Remove duplicates
+      'actions'
+    ];
+    
+    // Add multiselect column if in multiselect mode
+    if (this.isMultiSelectMode()) {
+      this.displayedColumns.push('multiselect');
+    }
+    
+  }
+
+  private clearRelationshipCache() {
+    this.relationshipValueCache.clear();
+    this.relationshipOptionsCache.clear();
+  }
+
+  onColumnDrop(event: CdkDragDrop<any[]>) {
+    // Only allow reordering if we have an active view
+    if (!this.activeView) {
+      return;
+    }
+
+    // Check if the item was actually moved
+    if (event.previousIndex === event.currentIndex) {
+      return;
+    }
+
+    // Get the previous and current items
+    const previousItem = this.displayedColumns[event.previousIndex];
+    const currentItem = this.displayedColumns[event.currentIndex];
+
+    // Check if we're moving regular columns or relationship columns
+    const isPreviousRegular = this.regularColumns.some(col => col.name === previousItem);
+    const isCurrentRegular = this.regularColumns.some(col => col.name === currentItem);
+
+    if (isPreviousRegular && isCurrentRegular) {
+      // Moving regular columns
+      const previousColumn = this.regularColumns.find(col => col.name === previousItem);
+      const currentColumn = this.regularColumns.find(col => col.name === currentItem);
+      
+      if (previousColumn && currentColumn) {
+        const previousIndex = this.regularColumns.indexOf(previousColumn);
+        const currentIndex = this.regularColumns.indexOf(currentColumn);
+        
+        moveItemInArray(this.regularColumns, previousIndex, currentIndex);
+        this.updateDisplayedColumnsOrder();
+        this.saveColumnOrderToCurrentView();
+      }
+    } else {
+      // Moving relationship columns or mixing regular and relationship columns
+      // Move in the displayedColumns array
+      moveItemInArray(this.displayedColumns, event.previousIndex, event.currentIndex);
+      
+      // If we're moving regular columns, also update regularColumns array
+      if (isPreviousRegular) {
+        const regularColumnNames = this.displayedColumns.filter(col => 
+          this.regularColumns.some(regCol => regCol.name === col)
+        );
+        
+        // Reorder regularColumns to match the new order
+        this.regularColumns = regularColumnNames.map(name => 
+          this.regularColumns.find(col => col.name === name)!
+        );
+      }
+      
+      this.saveColumnOrderToCurrentView();
+    }
+  }
+
+  private updateDisplayedColumnsOrder() {
+    // Rebuild displayedColumns array with the new order
+    const regularColumnNames = this.regularColumns.map(col => col.name);
+    const relationshipColumnNames = this.displayedColumns.filter(col => col.startsWith('rel_'));
+    
+    this.displayedColumns = [
+      ...regularColumnNames,
+      ...relationshipColumnNames,
+      'actions'
+    ];
+  }
+
+  private saveColumnOrderToCurrentView() {
+    if (!this.activeView) {
+      // If no active view, don't auto-save
+      return;
+    }
+
+    // If it's a default view, we need to create column settings first
+    if (this.activeView.isDefault) {
+      // Initialize column settings if they don't exist
+      if (!this.activeView.columnSettings) {
+        this.activeView.columnSettings = [];
+      }
+      
+      // Add missing column settings
+      this.regularColumns.forEach((column, index) => {
+        const existingSetting = this.activeView!.columnSettings!.find(s => s.columnId === column.id);
+        if (!existingSetting) {
+          this.activeView!.columnSettings!.push({
+            columnId: column.id,
+            columnName: column.name,
+            isVisible: true,
+            order: index
+          });
+        }
+      });
+    }
+
+    // Create a map of column settings by columnId for quick lookup
+    const settingsMap = new Map<string, ColumnViewSetting>();
+    this.activeView.columnSettings!.forEach(setting => {
+      settingsMap.set(setting.columnId, setting);
+    });
+
+    // Update the order for each regular column based on its current position
+    this.regularColumns.forEach((column, index) => {
+      const setting = settingsMap.get(column.id);
+      if (setting) {
+        setting.order = index;
+      }
+    });
+
+    // Sort column settings by new order to maintain consistency
+    this.activeView.columnSettings!.sort((a, b) => a.order - b.order);
+
+    // Update the timestamp
+    this.activeView.updatedAt = new Date();
+
+    // Emit the view update event
+    this.viewUpdated.emit(this.activeView);
+    
+    // Show a brief notification
+    const viewType = this.activeView.isDefault ? 'default view' : 'view';
+    this.snackBar.open(`Column order saved to ${viewType} "${this.activeView.name}"`, 'Close', {
+      duration: 2000,
+      horizontalPosition: 'right',
+      verticalPosition: 'top'
+    });
+  }
+
+  formatCellValue(value: any, column: any): string {
+    if (value === null || value === undefined) {
+      return '-';
+    }
+    
+    if (column.type === 'boolean') {
+      return value ? 'Yes' : 'No';
+    }
+    
+    if (column.type === 'date' || column.type === 'datetime') {
+      return new Date(value).toLocaleDateString();
+    }
+    
+    return String(value);
+  }
+
+  getSourceTableName(sourceTableId: string): string {
+    const sourceTable = this.allTables.find(t => t.id === sourceTableId);
+    return sourceTable ? sourceTable.name : 'Unknown';
+  }
+
+  getRelationshipValue(element: any, relCol: RelationshipDisplayColumn, field: any): string {
+    // Create cache key
+    const cacheKey = `${element.id || 'unknown'}_${relCol.id}_${field.sourceColumnId}`;
+    
+    // Check cache first
+    if (this.relationshipValueCache.has(cacheKey)) {
+      return this.relationshipValueCache.get(cacheKey)!;
+    }
+
+    // Early return if no data available
+    if (!this.allTableData || Object.keys(this.allTableData).length === 0) {
+      const result = 'Loading...';
+      this.relationshipValueCache.set(cacheKey, result);
+      return result;
+    }
+
+    try {
+      // Find the foreign key column in the current table
+      const fkColumn = this.table.columns.find(col => 
+        col.isForeignKey && col.referencedTableId === relCol.sourceTableId
+      );
+      
+      if (!fkColumn) {
+        const result = 'No FK';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Get the foreign key value from the current record
+      const fkValue = element[fkColumn.name];
+      
+      if (!fkValue) {
+        const result = '-';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Find the source table
+      const sourceTable = this.allTables.find(t => t.id === relCol.sourceTableId);
+      if (!sourceTable) {
+        const result = 'Unknown Table';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Find the source column to display
+      const sourceColumn = sourceTable.columns.find(col => col.id === field.sourceColumnId);
+      if (!sourceColumn) {
+        const result = 'Unknown Field';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Get the actual data from the source table
+      const sourceTableData = this.allTableData[sourceTable.name];
+      if (!sourceTableData || !Array.isArray(sourceTableData)) {
+        const result = 'No Data';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Find the record in the source table that matches the foreign key
+      const pkColumn = sourceTable.columns.find(col => col.isPrimaryKey);
+      if (!pkColumn) {
+        const result = 'No PK';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      const sourceRecord = sourceTableData.find(record => 
+        String(record[pkColumn.name]) === String(fkValue)
+      );
+      
+      if (!sourceRecord) {
+        const result = 'Not Found';
+        this.relationshipValueCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Return the actual value from the source record
+      const actualValue = sourceRecord[sourceColumn.name];
+      const result = this.formatCellValue(actualValue, sourceColumn);
+      this.relationshipValueCache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      console.error('Error in getRelationshipValue:', error);
+      const result = 'Error';
+      this.relationshipValueCache.set(cacheKey, result);
+      return result;
+    }
+  }
+
+
+  getRelationshipDescription(rel: Relationship): string {
+    const fromTable = this.allTables.find(t => t.id === rel.fromTableId);
+    const toTable = this.allTables.find(t => t.id === rel.toTableId);
+    
+    if (fromTable && toTable) {
+      return `${fromTable.name} → ${toTable.name}`;
+    }
+    
+    return 'Unknown relationship';
+  }
+
+  // Helper methods for template
+  isEditing(rowIndex: number, columnName: string): boolean {
+    const cell = this.editingCell();
+    return cell?.row === rowIndex && cell?.column === columnName;
+  }
+
+  isEditingRelationship(rowIndex: number, relColId: string, fieldIndex: number): boolean {
+    const cell = this.editingCell();
+    return cell?.row === rowIndex && cell?.column === `rel_${relColId}_${fieldIndex}`;
+  }
+
+  // Column name editing methods
+  isEditingColumnName(columnId: string): boolean {
+    return this.editingColumnName() === columnId;
+  }
+
+  startEditColumnName(columnId: string, currentName: string) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    this.editingColumnName.set(columnId);
+    this.editingColumnNameValue.set(currentName);
+  }
+
+  updateEditingColumnNameValue(value: string) {
+    this.editingColumnNameValue.set(value);
+  }
+
+  saveColumnName(columnId: string) {
+    const newName = this.editingColumnNameValue().trim();
+    if (newName && newName !== '') {
+      // Find the column and update its name
+      const column = this.table.columns.find(col => col.id === columnId);
+      if (column && column.name !== newName) {
+        const oldName = column.name;
+        column.name = newName;
+        
+        // Emit schema update event
+        this.dataChanged.emit({
+          type: 'SCHEMA_UPDATE',
+          table: this.table.name,
+          data: { columnId, oldName, newName },
+          id: columnId
+        });
+
+        // Show notification
+        this.snackBar.open(`Column renamed from "${oldName}" to "${newName}"`, 'Close', {
+          duration: 2000,
+          horizontalPosition: 'right',
+          verticalPosition: 'top'
+        });
+      }
+    }
+    this.cancelEditColumnName();
+  }
+
+  cancelEditColumnName() {
+    this.editingColumnName.set(null);
+    this.editingColumnNameValue.set('');
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Control' || event.ctrlKey) {
+      this.isCtrlPressed.set(true);
+      this.isMultiSelectMode.set(true);
+      
+      // Cancel any active editing when entering multi-select mode
+      if (this.editingColumnName()) {
+        this.cancelEditColumnName();
+      }
+      if (this.editingCell()) {
+        this.cancelEdit();
+      }
+    }
+  }
+
+  @HostListener('document:keyup', ['$event'])
+  onKeyUp(event: KeyboardEvent) {
+    if (event.key === 'Control') {
+      this.isCtrlPressed.set(false);
+      // Don't exit multi-select mode, just prevent adding new elements
+      // Keep the current selection but disable further selection
+    }
+    
+    if (event.key === 'Escape' && this.isMultiSelectMode()) {
+      this.exitMultiSelectMode();
+    }
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    
+    // Check if click is on an input element or its children (don't cancel if clicking on input itself)
+    if (target && (target.tagName === 'INPUT' || 
+                   target.closest('app-modern-input') ||
+                   target.closest('.column-name-input') ||
+                   target.closest('.cell-edit-input'))) {
+      return; // Don't cancel if clicking on the input or its children
+    }
+    
+    // Check if click is outside the table container OR inside table but not on editable elements
+    if (this.tableContainer) {
+      const isOutsideTable = !this.tableContainer.nativeElement.contains(target);
+      const isInsideTable = this.tableContainer.nativeElement.contains(target);
+      
+      // Cancel if outside table OR inside table but clicked on non-editable elements
+      if (isOutsideTable || (isInsideTable && !this.isClickOnEditableElement(target))) {
+        // Cancel any active editing
+        if (this.editingColumnName()) {
+          this.cancelEditColumnName();
+        }
+        if (this.editingCell()) {
+          this.cancelEdit();
+        }
+        
+        // Clear selection if Ctrl is not pressed and we're in multi-select mode
+        if (this.isMultiSelectMode() && !this.isCtrlPressed() && this.getSelectedCount() > 0) {
+          this.clearSelection();
+        }
+      }
+    }
+  }
+
+  private isClickOnEditableElement(target: HTMLElement): boolean {
+    // Check if click is on editable elements that should start editing
+    return !!(target.closest('.column-name-editable') || 
+              target.closest('.editable') ||
+              target.closest('.cell-content'));
+  }
+
+  // Multi-select methods
+  toggleMultiSelectMode() {
+    this.isMultiSelectMode.set(!this.isMultiSelectMode());
+    if (!this.isMultiSelectMode()) {
+      this.selectedRows.set(new Set());
+    }
+  }
+
+  exitMultiSelectMode() {
+    this.isMultiSelectMode.set(false);
+    this.selectedRows.set(new Set());
+    this.isCtrlPressed.set(false);
+    
+    // Cancel any active editing when exiting multi-select mode
+    if (this.editingColumnName()) {
+      this.cancelEditColumnName();
+    }
+    if (this.editingCell()) {
+      this.cancelEdit();
+    }
+  }
+
+  onRowClick(rowIndex: number, event: MouseEvent) {
+    // Only handle row selection if Ctrl is pressed
+    if (this.isCtrlPressed()) {
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Cancel any active editing when starting row selection
+      if (this.editingColumnName()) {
+        this.cancelEditColumnName();
+      }
+      if (this.editingCell()) {
+        this.cancelEdit();
+      }
+      
+      this.toggleRowSelection(rowIndex);
+    } else if (this.isMultiSelectMode() && !this.isCtrlPressed()) {
+      // If in multi-select mode but Ctrl is not pressed, clear selection
+      event.preventDefault();
+      event.stopPropagation();
+      
+      // Cancel any active editing when clearing selection
+      if (this.editingColumnName()) {
+        this.cancelEditColumnName();
+      }
+      if (this.editingCell()) {
+        this.cancelEdit();
+      }
+      
+      this.clearSelection();
+    }
+  }
+
+  toggleRowSelection(rowIndex: number) {
+    const currentSelected = this.selectedRows();
+    const newSelected = new Set(currentSelected);
+    
+    if (newSelected.has(rowIndex)) {
+      newSelected.delete(rowIndex);
+    } else {
+      newSelected.add(rowIndex);
+    }
+    
+    this.selectedRows.set(newSelected);
+  }
+
+  isRowSelected(rowIndex: number): boolean {
+    return this.selectedRows().has(rowIndex);
+  }
+
+  selectAllVisibleRows() {
+    const allIndices = new Set<number>();
+    for (let i = 0; i < this.paginatedData.length; i++) {
+      allIndices.add(i);
+    }
+    this.selectedRows.set(allIndices);
+  }
+
+  clearSelection() {
+    this.selectedRows.set(new Set());
+  }
+
+  getSelectedCount(): number {
+    const count = this.selectedRows().size;
+    console.log('getSelectedCount:', count, 'selectedRows:', this.selectedRows());
+    return count;
+  }
+
+  deleteRow(index: number) {
+    const actualIndex = this.currentPage * this.pageSize + index;
+    this.data.splice(actualIndex, 1);
+    this.updatePagination();
+    this.dataChanged.emit({
+      type: 'DELETE',
+      table: this.table.name,
+      data: { index: actualIndex }
+    });
+  }
+
+  getCurrentProject(): any {
+    // Return a basic project structure for now
+    return {
+      tables: [this.table],
+      relationships: this.relationships
+    };
+  }
+
+  getSimpleRelationshipOptions(rel: any): { value: string; label: string }[] {
+    try {
+      const currentProject = this.getCurrentProject();
+      const relatedData = this.dataSimulationService.getRelatedData(rel.referencedTable, '', currentProject);
+      if (Array.isArray(relatedData)) {
+        return relatedData.map((item: any) => ({
+          value: item.id || item[Object.keys(item)[0]],
+          label: item.name || item[Object.keys(item)[1]] || item.id || item[Object.keys(item)[0]]
+        }));
+      }
+    } catch (error) {
+      console.error('Error getting simple relationship options:', error);
+    }
+    
+    return [];
+  }
+
+  getRelationshipDisplayValue(value: any, rel: any): string {
+    if (!value) return '-';
+    
+    // If it's a simple relationship, just return the value
+    if (!rel.displayColumnId) {
+      return value.toString();
+    }
+    
+    // For complex relationships, try to get the display value
+    try {
+      // Get the current project schema
+      const currentProject = this.getCurrentProject();
+      if (!currentProject) {
+        return value.toString();
+      }
+      
+      const relatedDataArray = this.dataSimulationService.getRelatedData(rel.referencedTable, value, currentProject);
+      if (Array.isArray(relatedDataArray) && relatedDataArray.length > 0 && rel.displayColumnId) {
+        const relatedData = relatedDataArray[0];
+        return relatedData[rel.displayColumnId] || value.toString();
+      }
+    } catch (error) {
+      console.error('Error getting relationship display value:', error);
+    }
+    
+    return value.toString();
+  }
+
+
+
+  deleteSelectedRows() {
+    const selectedIndices = Array.from(this.selectedRows()).sort((a, b) => b - a); // Sort descending to delete from end
+    
+    selectedIndices.forEach(index => {
+      const globalIndex = this.currentPage * this.pageSize + index;
+      const element = this.data[globalIndex];
+      
+      // Emit delete event
+      this.dataChanged.emit({
+        type: 'DELETE',
+        table: this.table.name,
+        data: element,
+        id: element.id || globalIndex
+      });
+      
+      // Remove from local data
+      this.data.splice(globalIndex, 1);
+    });
+    
+    // Clear selection and refresh
+    this.clearSelection();
+    this.updatePagination();
+    
+    // Show notification
+    this.snackBar.open(`${selectedIndices.length} row(s) deleted`, 'Close', {
+      duration: 2000,
+      horizontalPosition: 'right',
+      verticalPosition: 'top'
+    });
+  }
+
+  // Inline editing methods
+  startEdit(rowIndex: number, columnName: string, currentValue: any) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    const column = this.regularColumns.find(col => col.name === columnName);
+    if (column && column.isAutoIncrement) {
+      this.snackBar.open('Cannot edit auto-increment columns', 'Close', { duration: 2000 });
+      return;
+    }
+    
+    this.editingCell.set({ row: rowIndex, column: columnName });
+    this.editingValue.set(String(currentValue || ''));
+  }
+
+  startEditRelationship(rowIndex: number, relCol: RelationshipDisplayColumn, field: any, element: any) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    this.editingCell.set({ row: rowIndex, column: `rel_${relCol.id}_${relCol.fields.indexOf(field)}` });
+    this.editingValue.set(String(this.getRelationshipValue(element, relCol, field) || ''));
+  }
+
+  startEditSimpleRelationship(rowIndex: number, columnName: string, currentValue: any, rel: any) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    this.editingCell.set({ row: rowIndex, column: columnName });
+    this.editingValue.set(String(currentValue || ''));
+  }
+
+  updateEditingValue(value: any) {
+    this.editingValue.set(value);
+  }
+
+  saveEdit(rowIndex: number, columnName: string, element?: any) {
+    const newValue = this.editingValue();
+    
+    // If element is not provided, get it from the current data
+    if (!element) {
+      const actualIndex = this.currentPage * this.pageSize + rowIndex;
+      element = this.data[actualIndex];
+    }
+    
+    if (!element) return;
+    
+    const oldValue = element[columnName];
+    
+    if (newValue !== String(oldValue)) {
+      element[columnName] = this.parseValue(newValue, columnName);
+      
+      this.dataChanged.emit({
+        type: 'UPDATE',
+        table: this.table.name,
+        data: element,
+        id: element.id
+      });
+    }
+    
+    this.cancelEdit();
+  }
+
+  saveEditRelationship(rowIndex: number, relCol: RelationshipDisplayColumn, field: any, element: any) {
+    const newValue = this.editingValue();
+    const oldValue = this.getRelationshipValue(element, relCol, field);
+    
+    if (newValue !== String(oldValue)) {
+      // Update the foreign key value
+      const fkColumn = this.table.columns.find(col => col.isForeignKey && col.referencedTableId === relCol.sourceTableId);
+      if (fkColumn) {
+        element[fkColumn.name] = newValue;
+        
+        // Clear cache for this specific relationship value
+        const cacheKey = `${element.id || 'unknown'}_${relCol.id}_${field.sourceColumnId}`;
+        this.relationshipValueCache.delete(cacheKey);
+        
+        this.dataChanged.emit({
+          type: 'UPDATE',
+          table: this.table.name,
+          data: element,
+          id: element.id
+        });
+      }
+    }
+    
+    this.cancelEdit();
+  }
+
+  cancelEdit() {
+    this.editingCell.set(null);
+    this.editingValue.set('');
+  }
+
+  parseValue(value: string, columnName: string): any {
+    const column = this.regularColumns.find(col => col.name === columnName);
+    if (!column) return value;
+    
+    switch (column.type.toLowerCase()) {
+      case 'number':
+      case 'int':
+      case 'integer':
+        return parseInt(value) || 0;
+      case 'boolean':
+      case 'bool':
+        return value === 'true' || value === '1';
+      case 'decimal':
+      case 'float':
+        return parseFloat(value) || 0;
+      default:
+        return value;
+    }
+  }
+
+  getRelationshipOptions(relCol: RelationshipDisplayColumn): { value: string; label: string }[] {
+    // Create cache key
+    const cacheKey = `options_${relCol.id}`;
+    
+    // Check cache first
+    if (this.relationshipOptionsCache.has(cacheKey)) {
+      return this.relationshipOptionsCache.get(cacheKey)!;
+    }
+
+    try {
+      const sourceTable = this.allTables.find(t => t.id === relCol.sourceTableId);
+      if (!sourceTable) {
+        const result: { value: string; label: string }[] = [];
+        this.relationshipOptionsCache.set(cacheKey, result);
+        return result;
+      }
+      
+      const sourceTableData = this.allTableData[sourceTable.name];
+      if (!sourceTableData || !Array.isArray(sourceTableData)) {
+        const result: { value: string; label: string }[] = [];
+        this.relationshipOptionsCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Get the primary key column and the first display field
+      const pkColumn = sourceTable.columns.find(col => col.isPrimaryKey);
+      const displayField = relCol.fields[0];
+      const displayColumn = sourceTable.columns.find(col => col.id === displayField?.sourceColumnId);
+      
+      if (!pkColumn || !displayColumn) {
+        const result: { value: string; label: string }[] = [];
+        this.relationshipOptionsCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Return options based on actual data
+      const result = sourceTableData.map(record => ({
+        value: String(record[pkColumn.name]),
+        label: String(record[displayColumn.name] || record[pkColumn.name])
+      }));
+      
+      this.relationshipOptionsCache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      console.error('Error in getRelationshipOptions:', error);
+      const result: { value: string; label: string }[] = [];
+      this.relationshipOptionsCache.set(cacheKey, result);
+      return result;
+    }
+  }
+
+  addRecord() {
+    // Create new record with default values
+    const newRecord: any = { id: this.generateId() };
+    
+    this.regularColumns.forEach(col => {
+      if (col.isAutoIncrement) {
+        newRecord[col.name] = this.data.length + 1;
+      } else if (col.defaultValue) {
+        newRecord[col.name] = col.defaultValue;
+      } else {
+        newRecord[col.name] = this.getDefaultValue(col.type);
+      }
+    });
+    
+    this.dataChanged.emit({
+      type: 'CREATE',
+      table: this.table.name,
+      data: newRecord
+    });
+  }
+
+  addColumn() {
+    // Emit schema update to add new column
+    this.dataChanged.emit({
+      type: 'SCHEMA_UPDATE',
+      table: this.table.name,
+      data: null,
+      schemaUpdate: {
+        action: 'ADD_COLUMN',
+        tableId: this.table.id
+      }
+    });
+  }
+
+  editRecord(element: any, index: number) {
+    // TODO: Open dialog to edit record
+  }
+
+  // Pagination methods
+  updatePagination() {
+    this.totalRecords = this.data.length;
+    const startIndex = this.currentPage * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+    this.paginatedData = this.data.slice(startIndex, endIndex);
+  }
+
+  onPageChange(event: PageEvent) {
+    this.currentPage = event.pageIndex;
+    this.pageSize = event.pageSize;
+    this.updatePagination();
+  }
+
+  getDisplayedRange(): string {
+    const startIndex = this.currentPage * this.pageSize + 1;
+    const endIndex = Math.min((this.currentPage + 1) * this.pageSize, this.totalRecords);
+    return `${startIndex}-${endIndex}`;
+  }
+
+  // View management methods
+  onViewSelected(view: TableView) {
+    this.viewSelected.emit(view);
+  }
+
+  onViewCreated(view: TableView) {
+    this.viewCreated.emit(view);
+  }
+
+  openViewManager() {
+    // Open the view creation dialog
+    const dialogRef = this.dialog.open(ViewConfigDialogComponent, {
+      width: '600px',
+      maxWidth: '90vw',
+      data: {
+        table: this.table,
+        columns: this.displayedColumns,
+        currentView: this.activeView
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.onViewCreated(result);
+      }
+    });
+  }
+
+  onViewUpdated(view: TableView) {
+    this.viewUpdated.emit(view);
+  }
+
+  onViewDeleted(viewId: string) {
+    this.viewDeleted.emit(viewId);
+  }
+
+  deleteRecord(element: any, index: number) {
+    // Confirm and delete record
+    if (confirm('Are you sure you want to delete this record?')) {
+      this.dataChanged.emit({
+        type: 'DELETE',
+        table: this.table.name,
+        data: element,
+        id: element.id
+      });
+    }
+  }
+
+  private generateId(): string {
+    return Math.random().toString(36).substr(2, 9);
+  }
+
+  private getDefaultValue(type: string): any {
+    switch (type.toLowerCase()) {
+      case 'string':
+      case 'varchar':
+      case 'text':
+        return '';
+      case 'number':
+      case 'int':
+      case 'integer':
+        return 0;
+      case 'boolean':
+      case 'bool':
+        return false;
+      case 'date':
+        return new Date().toISOString().split('T')[0];
+      case 'datetime':
+        return new Date().toISOString();
+      default:
+        return '';
+    }
+  }
+}
