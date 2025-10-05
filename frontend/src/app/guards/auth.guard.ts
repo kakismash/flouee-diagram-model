@@ -25,7 +25,7 @@ export class AuthGuard implements CanActivate {
       take(1)
     );
     
-    const timeout$ = timer(5000).pipe(
+    const timeout$ = timer(10000).pipe( // Increased to 10 seconds
       mapTo({ isAuthenticated: false, isLoading: false, user: null, error: 'Auth timeout' })
     );
     

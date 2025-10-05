@@ -1,20 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { ThemeService } from './services/theme.service';
-import { ThemeSelectorComponent } from './components/theme-selector/theme-selector.component';
+import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, ThemeSelectorComponent],
+  imports: [RouterOutlet, CommonModule],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
-export class App implements OnInit {
-  
-  constructor(private themeService: ThemeService) {}
-
-  ngOnInit() {
-    // Initialize theme service
-    this.themeService.getCurrentTheme();
-  }
-}
+export class App {}

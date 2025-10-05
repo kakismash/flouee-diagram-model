@@ -129,12 +129,21 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     </div>
   `,
   styles: [`
+        // Global styles to force theme colors
+        .table-card * {
+          color: inherit;
+        }
+        
+        .table-card .table-header * {
+          color: var(--theme-text-primary) !important;
+        }
+        
         .table-card {
           position: relative;
           width: 280px;
-          background: #ffffff;
+          background: var(--theme-surface);
           border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          box-shadow: 0 2px 8px var(--theme-card-shadow);
           cursor: grab;
           transition: all 0.2s ease;
           user-select: none;
@@ -144,22 +153,23 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
         }
     
     .table-card:hover {
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+      box-shadow: 0 4px 16px var(--theme-card-shadow);
       transform: translateY(-1px);
-      border-color: #e3f2fd;
+      border-color: var(--theme-primary-container);
     }
     
     .table-card.dragging {
       cursor: grabbing;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 8px 24px var(--theme-card-shadow);
       transform: rotate(1deg) scale(1.02);
       z-index: 1000;
-      border-color: #1976d2;
+      border-color: var(--theme-primary);
     }
     
     .table-card.selected {
-      border-color: #1976d2;
-      box-shadow: 0 4px 16px rgba(25, 118, 210, 0.2);
+      border-radius: 4px;
+      border-color: var(--theme-primary);
+      box-shadow: 0 4px 16px var(--theme-primary);
     }
     
         .table-header {
@@ -167,9 +177,23 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
           align-items: center;
           justify-content: space-between;
           padding: 8px;
-          background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-          border-bottom: 1px solid #e9ecef;
+          background: var(--theme-primary);
+          border-bottom: 1px solid var(--theme-primary-dark);
           border-radius: 12px;
+          color: var(--theme-on-primary);
+          
+          // Ensure all text elements in header respect theme
+          * {
+            color: var(--theme-on-primary) !important;
+          }
+          
+          h1, h2, h3, h4, h5, h6 {
+            color: var(--theme-on-primary) !important;
+          }
+          
+          span, div, p {
+            color: var(--theme-on-primary) !important;
+          }
         }
     
     .table-title-section {
@@ -186,38 +210,107 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       width: 36px;
       height: 36px;
       border-radius: 8px;
-      background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+      background: var(--theme-primary-dark);
       margin-right: 12px;
-      box-shadow: 0 2px 4px rgba(25, 118, 210, 0.2);
+      box-shadow: 0 2px 4px var(--theme-primary);
     }
     
     .table-icon mat-icon {
       font-size: 20px;
       width: 20px;
       height: 20px;
-      color: white;
+      color: var(--theme-on-primary);
     }
     
     .table-info {
       flex: 1;
       min-width: 0;
+      
+      // Force all text elements inside table-info to respect theme
+      * {
+        color: var(--theme-text-primary) !important;
+      }
+      
+      h1, h2, h3, h4, h5, h6 {
+        color: var(--theme-text-primary) !important;
+      }
+      
+      span, div, p {
+        color: var(--theme-text-primary) !important;
+      }
     }
     
     .table-title {
       font-size: 16px;
       font-weight: 600;
       margin: 0 0 4px 0;
-      color: #2c3e50;
+      color: var(--theme-text-primary) !important;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       line-height: 1.2;
     }
     
+    // Ensure h3 elements in table headers respect theme
+    h3.table-title {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Specific selectors for table-info elements
+    .table-info h3.table-title {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    .table-info span.table-count {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Maximum specificity selectors to override any Material Design styles
+    .table-header .table-info h3[_ngcontent-c617701278] {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    .table-header .table-info span[_ngcontent-c617701278] {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Alternative approach - target by class combination
+    .table-header .table-info .table-title {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    .table-header .table-info .table-count {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Ultra-specific selectors to force theme colors
+    .table-card .table-header .table-info h3 {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    .table-card .table-header .table-info span {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Force all text in table headers
+    .table-card .table-header * {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    // Specific for the exact elements mentioned
+    .table-card .table-header .table-info .table-title {
+      color: var(--theme-text-primary) !important;
+    }
+    
+    .table-card .table-header .table-info .table-count {
+      color: var(--theme-text-primary) !important;
+    }
+    
     .table-count {
       font-size: 12px;
-      color: #6c757d;
+      color: var(--theme-text-primary) !important;
       font-weight: 500;
+      opacity: 0.8;
     }
     
     .table-actions {
@@ -229,12 +322,12 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       width: 32px;
       height: 32px;
       border-radius: 6px;
-      background: rgba(255, 255, 255, 0.8);
+      background: var(--theme-primary-container);
       transition: all 0.2s ease;
     }
     
     .action-btn:hover {
-      background: rgba(255, 255, 255, 1);
+      background: var(--theme-primary-dark);
       transform: scale(1.05);
     }
     
@@ -242,15 +335,19 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       font-size: 18px;
       width: 18px;
       height: 18px;
-      color: #6c757d;
+      color: var(--theme-on-primary-container);
     }
     
     .action-btn.link-btn mat-icon {
-      color: #2196F3;
+      color: var(--theme-info);
     }
     
     .action-btn.link-btn:hover {
-      background: rgba(33, 150, 243, 0.1);
+      background: var(--theme-info);
+    }
+    
+    .action-btn.link-btn:hover mat-icon {
+      color: var(--theme-on-primary);
     }
     
     .table-content {
@@ -268,14 +365,15 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
           align-items: center;
           justify-content: space-between;
           padding: 8px;
-          border-bottom: 1px solid #f1f3f4;
+          border-bottom: 1px solid var(--theme-divider);
           transition: background-color 0.2s ease;
           gap: 12px;
           min-height: 50px;
+          background: var(--theme-surface);
         }
     
     .column-item:hover {
-      background-color: #f8f9fa;
+      background-color: var(--theme-surface-variant);
     }
     
     .column-item:last-child {
@@ -283,8 +381,8 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     }
     
     .column-item.primary-key {
-      background: linear-gradient(90deg, rgba(25, 118, 210, 0.05) 0%, transparent 100%);
-      border-left: 3px solid #1976d2;
+      background: var(--theme-primary-container);
+      border-left: 3px solid var(--theme-primary);
     }
     
         .column-main {
@@ -299,7 +397,7 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
         .column-name {
           font-size: 14px;
           font-weight: 600;
-          color: #2c3e50;
+          color: var(--theme-text-primary);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -308,57 +406,58 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
         
         .column-type {
           font-size: 11px;
-          color: #495057;
+          color: var(--theme-text-secondary);
           padding: 3px 8px;
           border-radius: 6px;
           font-weight: 500;
           white-space: nowrap;
           font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
           align-self: flex-start;
-          border: 1px solid transparent;
+          border: 1px solid var(--theme-outline);
+          background: var(--theme-surface-variant);
         }
         
         /* Type-specific colors */
         .column-type.serial {
-          background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-          color: #1976d2;
-          border-color: #bbdefb;
+          background: var(--theme-primary-container);
+          color: var(--theme-primary);
+          border-color: var(--theme-primary);
         }
         
         .column-type.varchar {
-          background: linear-gradient(135deg, #e8f5e8 0%, #f1f8e9 100%);
-          color: #388e3c;
-          border-color: #c8e6c9;
+          background: var(--theme-success);
+          color: var(--theme-on-primary);
+          border-color: var(--theme-success);
         }
         
         .column-type.text {
-          background: linear-gradient(135deg, #fff3e0 0%, #fce4ec 100%);
-          color: #f57c00;
-          border-color: #ffcc02;
+          background: var(--theme-warning);
+          color: var(--theme-on-primary);
+          border-color: var(--theme-warning);
         }
         
         .column-type.timestamp {
-          background: linear-gradient(135deg, #f3e5f5 0%, #e8eaf6 100%);
-          color: #7b1fa2;
-          border-color: #ce93d8;
+          background: var(--theme-secondary);
+          color: var(--theme-on-primary);
+          border-color: var(--theme-secondary);
         }
         
         .column-type.integer {
-          background: linear-gradient(135deg, #e0f2f1 0%, #e8f5e8 100%);
-          color: #00695c;
-          border-color: #a5d6a7;
+          background: var(--theme-info);
+          color: var(--theme-on-primary);
+          border-color: var(--theme-info);
         }
         
         .column-type.boolean {
-          background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
-          color: #c2185b;
-          border-color: #f48fb1;
+          background: var(--theme-error);
+          color: var(--theme-on-primary);
+          border-color: var(--theme-error);
         }
         
         .column-type.default {
-          background: linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%);
-          color: #616161;
-          border-color: #bdbdbd;
+          background: var(--theme-surface-variant);
+          color: var(--theme-text-secondary);
+          border-color: var(--theme-outline);
         }
     
     .column-badges {
@@ -381,44 +480,50 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     }
     
     .badge.pk {
-      background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+      background: var(--theme-primary);
+      color: var(--theme-on-primary);
     }
     
     .badge.nn {
-      background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+      background: var(--theme-error);
+      color: var(--theme-on-primary);
     }
     
     .badge.u {
-      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+      background: var(--theme-success);
+      color: var(--theme-on-primary);
     }
     
     .badge.d {
-      background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%);
+      background: var(--theme-secondary);
+      color: var(--theme-on-primary);
     }
     
     .badge.ai {
-      background: linear-gradient(135deg, #fd7e14 0%, #ffc107 100%);
+      background: var(--theme-warning);
+      color: var(--theme-on-primary);
     }
     
     .badge.ag {
-      background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+      background: var(--theme-info);
+      color: var(--theme-on-primary);
     }
     
     .badge.rel {
-      background: #e3f2fd;
-      color: #1976d2;
+      background: var(--theme-primary-container);
+      color: var(--theme-primary);
     }
     
     .relationship-columns-container {
-      border-top: 2px solid #e0e0e0;
+      border-top: 2px solid var(--theme-divider);
       margin-top: 8px;
       padding-top: 8px;
     }
     
     .relationship-column-item {
-      background: #f8f9fa;
+      background: var(--theme-primary-container);
       border-radius: 4px;
-      border-left: 3px solid #1976d2;
+      border-left: 3px solid var(--theme-primary);
       margin: 2px 0;
       padding: 8px 12px;
     }
@@ -437,14 +542,14 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     }
     
     .relationship-column-source {
-      color: #1976d2;
+      color: var(--theme-primary);
       font-weight: 500;
       font-size: 14px;
     }
     
     .relationship-column-type {
-      background: #e3f2fd;
-      color: #1976d2;
+      background: var(--theme-primary);
+      color: var(--theme-on-primary);
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 3px;
@@ -460,21 +565,21 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       justify-content: space-between;
       align-items: center;
       padding: 4px 8px;
-      background: #ffffff;
+      background: var(--theme-surface);
       border-radius: 3px;
       margin-bottom: 2px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
     }
     
     .field-name {
-      color: #555;
+      color: var(--theme-text-primary);
       font-size: 12px;
       font-weight: 400;
     }
     
     .field-type {
-      background: #f5f5f5;
-      color: #666;
+      background: var(--theme-surface-variant);
+      color: var(--theme-text-secondary);
       font-size: 9px;
       padding: 1px 4px;
       border-radius: 2px;
@@ -488,6 +593,7 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       pointer-events: auto;
       z-index: 10;
       position: relative;
+      color: var(--theme-primary) !important;
     }
     
     .relationship-column-edit-btn mat-icon {
@@ -495,15 +601,16 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       width: 14px;
       height: 14px;
       line-height: 14px;
+      color: var(--theme-primary) !important;
     }
     
     .more-indicator {
       padding: 12px 16px;
       text-align: center;
-      background: #f8f9fa;
-      border-top: 1px solid #e9ecef;
+      background: var(--theme-surface-variant);
+      border-top: 1px solid var(--theme-divider);
       font-size: 12px;
-      color: #6c757d;
+      color: var(--theme-text-secondary);
       font-weight: 500;
     }
     
@@ -512,7 +619,7 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       flex-direction: column;
       align-items: center;
       padding: 24px 16px;
-      color: #adb5bd;
+      color: var(--theme-text-disabled);
       font-size: 14px;
     }
     
@@ -534,16 +641,16 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     }
     
     .columns-container::-webkit-scrollbar-track {
-      background: #f1f1f1;
+      background: var(--theme-surface-variant);
     }
     
     .columns-container::-webkit-scrollbar-thumb {
-      background: #c1c1c1;
+      background: var(--theme-outline);
       border-radius: 2px;
     }
     
     .columns-container::-webkit-scrollbar-thumb:hover {
-      background: #a8a8a8;
+      background: var(--theme-text-secondary);
     }
   `]
 })

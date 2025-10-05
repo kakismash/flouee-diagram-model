@@ -1,0 +1,103 @@
+.authenticated-container {
+  min-height: 100vh;
+  background-color: var(--theme-background);
+  color: var(--theme-text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.shared-toolbar {
+  flex-shrink: 0;
+  background: var(--theme-primary) !important;
+  color: var(--theme-on-primary) !important;
+  box-shadow: 0 2px 4px var(--theme-shadow);
+  z-index: 1000;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.app-title {
+  font-weight: 500;
+  font-size: 20px;
+}
+
+.user-email {
+  margin-right: 16px;
+  font-size: 14px;
+  opacity: 0.9;
+  color: var(--theme-on-primary);
+}
+
+.editor-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 16px;
+}
+
+.view-mode-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+.toolbar-chips {
+  display: flex;
+  gap: 4px;
+}
+
+::ng-deep .toolbar-chips .mat-mdc-chip {
+  background: var(--theme-surface) !important;
+  color: var(--theme-text-primary) !important;
+  font-size: 12px;
+  height: 24px;
+}
+
+.toolbar-theme-selector {
+  margin-right: 8px;
+}
+
+.main-content {
+  flex: 1;
+  width: 100%;
+  min-height: calc(100vh - 64px); // Minimum height minus toolbar
+  overflow-y: auto; // Allow scroll if content exceeds
+}
+
+/* Ensure toolbar elements respect theme */
+.shared-toolbar ::ng-deep .mat-mdc-button,
+.shared-toolbar ::ng-deep .mat-mdc-icon-button {
+  color: var(--theme-on-primary) !important;
+}
+
+.shared-toolbar ::ng-deep .mat-mdc-button:hover,
+.shared-toolbar ::ng-deep .mat-mdc-icon-button:hover {
+  background: var(--theme-primary-dark) !important;
+}
+
+.shared-toolbar ::ng-deep .mat-mdc-menu-panel {
+  background: var(--theme-surface);
+}
+
+.shared-toolbar ::ng-deep .mat-mdc-menu-item {
+  color: var(--theme-text-primary);
+}
+
+.shared-toolbar ::ng-deep .mat-mdc-menu-item:hover {
+  background: var(--theme-hover);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .app-title {
+    font-size: 16px;
+  }
+  
+  .user-email {
+    display: none;
+  }
+}

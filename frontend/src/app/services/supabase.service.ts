@@ -21,7 +21,7 @@ export class SupabaseService {
           detectSessionInUrl: false,
           flowType: 'pkce',
           storage: window.localStorage,
-          storageKey: 'flouee-auth'
+          storageKey: 'flouee-auth-session'
         },
         global: {
           headers: {
@@ -140,7 +140,7 @@ export class SupabaseService {
           detectSessionInUrl: false,
           flowType: 'pkce',
           storage: window.localStorage,
-          storageKey: 'flouee-auth'
+          storageKey: 'flouee-auth-session'
         },
         global: {
           headers: {

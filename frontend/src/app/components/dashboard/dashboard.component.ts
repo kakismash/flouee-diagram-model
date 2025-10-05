@@ -29,24 +29,6 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
   ],
   template: `
     <div class="dashboard">
-      <!-- Toolbar -->
-      <mat-toolbar color="primary">
-        <span>Flouee Diagram Model</span>
-        <span class="spacer"></span>
-        
-        <span class="user-email">{{ authService.user()?.email }}</span>
-        
-        <button mat-icon-button [matMenuTriggerFor]="userMenu">
-          <mat-icon>account_circle</mat-icon>
-        </button>
-        <mat-menu #userMenu="matMenu">
-          <button mat-menu-item (click)="logout()">
-            <mat-icon>logout</mat-icon>
-            <span>Logout</span>
-          </button>
-        </mat-menu>
-      </mat-toolbar>
-
       <!-- Dashboard Content -->
       <div class="dashboard-content">
         <div class="header">
@@ -123,29 +105,16 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
   `,
   styles: [`
     .dashboard {
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      background: #f5f5f5;
-    }
-
-    .spacer {
-      flex: 1 1 auto;
-    }
-
-    .user-email {
-      margin-right: 16px;
-      font-size: 14px;
-      opacity: 0.9;
+      height: 100%;
+      background: var(--theme-background);
     }
 
     .dashboard-content {
-      flex: 1;
-      overflow-y: auto;
       padding: 32px;
       max-width: 1400px;
       margin: 0 auto;
       width: 100%;
+      background: var(--theme-background);
     }
 
     .header {
@@ -159,7 +128,7 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
       margin: 0;
       font-size: 32px;
       font-weight: 500;
-      color: #333;
+      color: var(--theme-text-primary);
     }
 
     .loading-container {
@@ -171,30 +140,34 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
       gap: 16px;
     }
 
+    .loading-container p {
+      color: var(--theme-text-secondary);
+    }
+
     .empty-state {
       text-align: center;
       padding: 64px 32px;
-      background: white;
+      background: var(--theme-surface);
       border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 4px var(--theme-shadow);
     }
 
     .empty-icon {
       font-size: 96px;
       width: 96px;
       height: 96px;
-      color: #ccc;
+      color: var(--theme-text-disabled);
       margin-bottom: 16px;
     }
 
     .empty-state h2 {
       margin: 0 0 8px 0;
-      color: #666;
+      color: var(--theme-text-secondary);
     }
 
     .empty-state p {
       margin: 0 0 24px 0;
-      color: #999;
+      color: var(--theme-text-disabled);
     }
 
     .projects-grid {
@@ -207,22 +180,32 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
       cursor: pointer;
       transition: all 0.2s ease;
       position: relative;
+      background: var(--theme-surface);
+      color: var(--theme-text-primary);
     }
 
     .project-card:hover {
       transform: translateY(-4px);
-      box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+      box-shadow: 0 8px 16px var(--theme-shadow);
     }
 
     .project-card mat-card-header {
       margin-bottom: 16px;
     }
 
+    .project-card mat-card-title {
+      color: var(--theme-text-primary);
+    }
+
+    .project-card mat-card-subtitle {
+      color: var(--theme-text-secondary);
+    }
+
     .project-card mat-icon[mat-card-avatar] {
       font-size: 40px;
       width: 40px;
       height: 40px;
-      color: #667eea;
+      color: var(--theme-primary);
     }
 
     .project-stats {
@@ -235,7 +218,7 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
       display: flex;
       align-items: center;
       gap: 8px;
-      color: #666;
+      color: var(--theme-text-secondary);
       font-size: 14px;
     }
 
@@ -243,11 +226,50 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
       font-size: 18px;
       width: 18px;
       height: 18px;
-      color: #999;
+      color: var(--theme-text-disabled);
     }
 
     mat-card-actions {
       padding: 8px 16px;
+    }
+
+    /* Material theme overrides */
+    .dashboard ::ng-deep .mat-mdc-card {
+      background: var(--theme-surface);
+      color: var(--theme-text-primary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-card-title {
+      color: var(--theme-text-primary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-card-subtitle {
+      color: var(--theme-text-secondary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-menu-panel {
+      background: var(--theme-surface);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-menu-item {
+      color: var(--theme-text-primary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-menu-item:hover {
+      background: var(--theme-hover);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-button {
+      color: var(--theme-text-primary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-raised-button {
+      background: var(--theme-primary);
+      color: var(--theme-on-primary);
+    }
+
+    .dashboard ::ng-deep .mat-mdc-raised-button:hover {
+      background: var(--theme-primary-dark);
     }
   `]
 })
@@ -371,7 +393,4 @@ export class DashboardComponent implements OnInit {
     return d.toLocaleDateString();
   }
 
-  logout() {
-    this.authService.signOut();
-  }
 }

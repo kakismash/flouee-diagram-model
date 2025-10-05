@@ -1,35 +1,82 @@
 .diagram-editor {
-  height: 100vh;
+  height: calc(100vh - 64px); // Subtract toolbar height
   display: flex;
   flex-direction: column;
-}
-
-.toolbar {
-  flex-shrink: 0;
-  z-index: 1000;
+  background: var(--theme-background);
+  color: var(--theme-text-primary);
   
-  .spacer {
-    flex: 1 1 auto;
+  // Ensure all text elements respect theme
+  * {
+    color: inherit;
+  }
+  
+  // Specific text elements
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--theme-text-primary);
+  }
+  
+  p, span, div {
+    color: var(--theme-text-primary);
+  }
+  
+  // Material Design specific elements
+  .mat-mdc-tooltip {
+    background: var(--theme-surface);
+    color: var(--theme-text-primary);
   }
 }
+
 
 .editor-container {
   flex: 1;
   overflow: hidden;
+  background: var(--theme-background);
 }
 
 .sidenav-container {
   height: 100%;
+  background: var(--theme-background);
+}
+
+::ng-deep .mat-sidenav-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidenav {
   width: 300px;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid var(--theme-border);
+  background: var(--theme-surface) !important;
+  color: var(--theme-text-primary) !important;
+  
+  // Ensure subheaders respect theme
+  .mat-mdc-subheader {
+    color: var(--theme-text-primary) !important;
+    font-weight: 600;
+  }
+  
+  // List items should respect theme
+  .mat-mdc-list-item {
+    color: var(--theme-text-primary) !important;
+    
+    &:hover {
+      background: var(--theme-surface-variant) !important;
+    }
+    
+    &.selected {
+      background: var(--theme-primary-container) !important;
+      color: var(--theme-on-primary-container) !important;
+    }
+  }
 }
 
 .main-content {
   padding: 0;
   overflow: hidden;
+  background: var(--theme-background);
+  height: 100%;
+  flex: 1;
 }
 
 .canvas-container {
@@ -37,7 +84,7 @@
   height: 100%;
   position: relative;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--theme-background);
   cursor: grab;
   touch-action: none;
   
@@ -60,22 +107,24 @@
       position: absolute;
       top: 20px;
       right: 20px;
-      background: rgba(255, 255, 255, 0.9);
+      background: var(--theme-surface);
+      border: 1px solid var(--theme-border);
       padding: 16px;
       border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 2px 8px var(--theme-card-shadow);
       font-size: 12px;
       line-height: 1.4;
       max-width: 200px;
       pointer-events: auto;
+      color: var(--theme-text-primary);
       
       p {
         margin: 4px 0;
-        color: #666;
+        color: var(--theme-text-secondary);
       }
       
       strong {
-        color: #333;
+        color: var(--theme-text-primary);
       }
     }
     
@@ -85,15 +134,14 @@
     right: 20px;
     z-index: 1000;
     pointer-events: auto;
+    background: var(--theme-primary) !important;
+    color: var(--theme-on-primary) !important;
+    
+    mat-icon {
+      color: var(--theme-on-primary) !important;
+    }
   }
 
-  .test-error-button {
-    position: absolute;
-    bottom: 20px;
-    right: 100px;
-    z-index: 1000;
-    pointer-events: auto;
-  }
 
 .table-cards-container {
   position: absolute;
@@ -109,16 +157,33 @@
 }
 
 .mat-mdc-list-item.selected {
-  background-color: #e3f2fd;
-  color: #1976d2;
+  background-color: var(--theme-primary-container) !important;
+  color: var(--theme-on-primary-container) !important;
 }
 
 .mat-mdc-list-item {
   cursor: pointer;
+  color: var(--theme-text-primary) !important;
   
   &:hover {
-    background-color: #f5f5f5;
+    background-color: var(--theme-surface-variant) !important;
   }
+  
+  .mat-mdc-list-item-title {
+    color: var(--theme-text-primary) !important;
+  }
+  
+  .mat-mdc-list-item-line {
+    color: var(--theme-text-secondary) !important;
+  }
+  
+  .mat-icon {
+    color: var(--theme-text-secondary) !important;
+  }
+}
+
+.mat-mdc-subheader {
+  color: var(--theme-text-primary) !important;
 }
 
 // Responsive design

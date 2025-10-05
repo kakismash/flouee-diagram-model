@@ -1,4 +1,4 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, signal, OnInit, ViewChildren, QueryList } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewInit, signal, OnInit, OnDestroy, ViewChildren, QueryList } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatToolbarModule } from '@angular/material/toolbar';
@@ -45,7 +45,7 @@ import { AuthService } from '../../services/auth.service';
   templateUrl: './diagram-editor.component.html',
   styleUrl: './diagram-editor.component.scss'
 })
-export class DiagramEditorComponent implements AfterViewInit, OnInit {
+export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy {
   @ViewChild('canvasContainer', { static: true}) canvasRef!: ElementRef<HTMLDivElement>;
   @ViewChildren(RelationshipLineComponent) relationshipLines!: QueryList<RelationshipLineComponent>;
 
@@ -85,6 +85,36 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit {
     
     // Load the project
     await this.loadProject(this.projectId);
+    
+    // Listen for editor actions from the shared toolbar
+    window.addEventListener('editor-action', this.handleEditorAction.bind(this) as EventListener);
+  }
+
+  ngOnDestroy() {
+    // Remove event listener
+    window.removeEventListener('editor-action', this.handleEditorAction.bind(this) as EventListener);
+  }
+
+  private handleEditorAction(event: Event) {
+    const customEvent = event as CustomEvent;
+    const action = customEvent.detail?.action;
+    switch (action) {
+      case 'addTable':
+        this.addTable();
+        break;
+      case 'deleteTable':
+        this.deleteSelectedTable();
+        break;
+      case 'addRelationship':
+        this.addRelationship();
+        break;
+      case 'generateSQL':
+        this.generateSQL();
+        break;
+      case 'viewMode':
+        this.openViewMode();
+        break;
+    }
   }
 
   ngAfterViewInit() {
@@ -682,10 +712,6 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit {
     }, 1000); // Save after 1 second of inactivity
   }
 
-  // Test method to trigger error notification
-  testErrorNotification(): void {
-    this.notificationService.showError('This is a test error message to verify the notification system is working correctly.');
-  }
 
   // Relationship methods - Simple approach
   onLinkRequested(fromTable: Table): void {
@@ -818,15 +844,8 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit {
     this.debouncedSave();
   }
 
-  // Navigation methods
-  backToDashboard(): void {
-    this.router.navigate(['/dashboard']);
-  }
+  // Navigation methods (now handled by shared layout)
 
-  // Logout method
-  logout(): void {
-    this.authService.signOut();
-  }
   
   // Helper to get table by ID
   getTableById(id: string): Table | undefined {

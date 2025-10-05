@@ -209,11 +209,36 @@ export interface ModernInputConfig {
       width: 24px;
       height: 24px;
       line-height: 24px;
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: none;
+      position: relative;
+      z-index: 1;
     }
 
     .clear-button:hover,
     .password-toggle:hover {
       color: var(--theme-primary);
+    }
+
+    /* Ensure buttons don't affect input width */
+    .modern-input-container ::ng-deep .mat-mdc-form-field-suffix {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: auto;
+      min-width: 40px;
+      padding: 0 8px;
+    }
+
+    .modern-input-container ::ng-deep .mat-mdc-form-field-prefix {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: auto;
+      min-width: 40px;
+      padding: 0 8px;
     }
 
     /* Focus states */
@@ -272,6 +297,7 @@ export interface ModernInputConfig {
     .dark-theme .modern-input-container ::ng-deep .mat-mdc-input-element::placeholder {
       color: var(--theme-text-secondary);
     }
+
   `]
 })
 export class ModernInputComponent implements ControlValueAccessor, OnInit, OnChanges {
@@ -316,6 +342,11 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
   }
 
   getDynamicWidth(): string {
+    // If maxLength is specified, use fixed width based on maxLength
+    if (this.config.maxLength) {
+      return this.getFixedWidthForMaxLength();
+    }
+
     const currentValue = this.internalValue();
     const placeholder = this.config.placeholder || '';
     const textToMeasure = currentValue || placeholder;
@@ -333,6 +364,38 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
     // Add padding for form field
     const padding = 32; // 16px on each side
     const finalWidth = Math.max(totalWidth + padding, 80); // Minimum 80px
+    
+    return `${finalWidth}px`;
+  }
+
+  private getFixedWidthForMaxLength(): string {
+    const maxLength = this.config.maxLength || 50;
+    
+    // Calculate width based on maxLength characters
+    // Use a representative character width (average of 'M' and 'i')
+    const avgCharWidth = this.measureTextWidth('Mi') / 2;
+    const textWidth = avgCharWidth * maxLength;
+    
+    // Calculate padding based on what elements are present
+    let padding = 32; // Base padding for borders
+    
+    // Add space for left icon if present
+    if (this.config.icon && this.config.iconPosition !== 'right') {
+      padding += 40; // Icon + spacing
+    }
+    
+    // Add space for right elements (icon, clear button, password toggle)
+    if (this.config.icon && this.config.iconPosition === 'right') {
+      padding += 40; // Icon + spacing
+    }
+    if (this.config.showClearButton) {
+      padding += 40; // Clear button + spacing
+    }
+    if (this.config.showPasswordToggle && this.config.type === 'password') {
+      padding += 40; // Password toggle button + spacing
+    }
+    
+    const finalWidth = Math.max(textWidth + padding, 120); // Minimum 120px for readability
     
     return `${finalWidth}px`;
   }

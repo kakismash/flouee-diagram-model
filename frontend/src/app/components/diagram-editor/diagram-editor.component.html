@@ -1,62 +1,4 @@
 <div class="diagram-editor">
-  <!-- Toolbar -->
-  <mat-toolbar color="primary" class="toolbar">
-    <button mat-icon-button matTooltip="Back to Dashboard" (click)="backToDashboard()">
-      <mat-icon>arrow_back</mat-icon>
-    </button>
-    
-    <span>Flouee Diagram Model</span>
-    <span class="spacer"></span>
-    
-    <button mat-icon-button [matMenuTriggerFor]="fileMenu" matTooltip="File">
-      <mat-icon>folder</mat-icon>
-    </button>
-    <mat-menu #fileMenu="matMenu">
-      <button mat-menu-item>
-        <mat-icon>add</mat-icon>
-        <span>New Diagram</span>
-      </button>
-      <button mat-menu-item>
-        <mat-icon>folder_open</mat-icon>
-        <span>Open</span>
-      </button>
-      <button mat-menu-item>
-        <mat-icon>save</mat-icon>
-        <span>Save</span>
-      </button>
-    </mat-menu>
-
-    <button mat-icon-button [matMenuTriggerFor]="editMenu" matTooltip="Edit">
-      <mat-icon>edit</mat-icon>
-    </button>
-    <mat-menu #editMenu="matMenu">
-      <button mat-menu-item (click)="addTable()">
-        <mat-icon>table_chart</mat-icon>
-        <span>Add Table</span>
-      </button>
-      <button mat-menu-item [disabled]="!selectedTable()" (click)="deleteSelectedTable()">
-        <mat-icon>delete</mat-icon>
-        <span>Delete Table</span>
-      </button>
-      <mat-divider></mat-divider>
-      <button mat-menu-item (click)="addRelationship()" [disabled]="tables().length < 2">
-        <mat-icon>timeline</mat-icon>
-        <span>Add Relationship</span>
-      </button>
-    </mat-menu>
-
-        <button mat-icon-button (click)="generateSQL()" matTooltip="Generate SQL">
-          <mat-icon>code</mat-icon>
-        </button>
-        <button mat-icon-button (click)="openViewMode()" matTooltip="View Mode">
-          <mat-icon>visibility</mat-icon>
-        </button>
-    
-    <button mat-icon-button matTooltip="Logout" (click)="logout()">
-      <mat-icon>logout</mat-icon>
-    </button>
-  </mat-toolbar>
-
   <div class="editor-container">
     <!-- Sidebar -->
     <mat-sidenav-container class="sidenav-container">
@@ -151,15 +93,6 @@
                     (click)="addTable()"
                     matTooltip="Add New Table">
               <mat-icon>add</mat-icon>
-            </button>
-            
-            <!-- Test Error Button -->
-            <button mat-fab 
-                    color="warn" 
-                    class="test-error-button"
-                    (click)="testErrorNotification()"
-                    matTooltip="Test Error Notification">
-              <mat-icon>error</mat-icon>
             </button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { TableView, ColumnViewSetting } from '../models/table-view.model';
-import { Table, TableColumn } from '../models/table.model';
+import { Table, TableColumn, Relationship, RelationshipDisplayColumn } from '../models/table.model';
 
 @Injectable({
   providedIn: 'root'
@@ -14,14 +14,20 @@ export class TableViewService {
   /**
    * Crea una nueva vista para una tabla
    */
-  createView(table: Table, name: string, description?: string): TableView {
+  createView(
+    table: Table, 
+    name: string, 
+    description?: string,
+    relationships: Relationship[] = [], 
+    relationshipDisplayColumns: RelationshipDisplayColumn[] = []
+  ): TableView {
     const view: TableView = {
       id: this.generateId(),
       name,
       description,
       tableId: table.id,
       isDefault: false,
-      columnSettings: this.createDefaultColumnSettings(table),
+      columnSettings: this.createDefaultColumnSettings(table, relationships, relationshipDisplayColumns),
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -32,14 +38,18 @@ export class TableViewService {
   /**
    * Crea la vista por defecto para una tabla
    */
-  createDefaultView(table: Table): TableView {
+  createDefaultView(
+    table: Table, 
+    relationships: Relationship[] = [], 
+    relationshipDisplayColumns: RelationshipDisplayColumn[] = []
+  ): TableView {
     const view: TableView = {
       id: this.generateId(),
       name: 'Default View',
       description: 'Default view showing all columns',
       tableId: table.id,
       isDefault: true,
-      columnSettings: this.createDefaultColumnSettings(table),
+      columnSettings: this.createDefaultColumnSettings(table, relationships, relationshipDisplayColumns),
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -50,20 +60,58 @@ export class TableViewService {
   /**
    * Crea configuraciones de columna por defecto
    */
-  private createDefaultColumnSettings(table: Table): ColumnViewSetting[] {
+  private createDefaultColumnSettings(
+    table: Table, 
+    relationships: Relationship[] = [], 
+    relationshipDisplayColumns: RelationshipDisplayColumn[] = []
+  ): ColumnViewSetting[] {
     const settings: ColumnViewSetting[] = [];
+    let orderIndex = 0;
     
-    // Regular columns
-    table.columns
-      .filter(col => !col.isSystemGenerated && !col.isForeignKey)
-      .forEach((col, index) => {
-        settings.push({
-          columnId: col.id,
-          columnName: col.name,
+    // Regular columns - maintain original order from table definition
+    const regularColumns = table.columns.filter(col => !col.isSystemGenerated && !col.isForeignKey);
+    
+    regularColumns.forEach((col) => {
+      const setting = {
+        columnId: col.id,
+        columnName: col.name,
+        isVisible: true,
+        order: orderIndex++
+      };
+      settings.push(setting);
+    });
+
+    // Relationship Display Columns - Each field as separate column
+    const tableRelationshipDisplayColumns = relationshipDisplayColumns.filter(col => col.tableId === table.id);
+    
+    tableRelationshipDisplayColumns.forEach(relCol => {
+      relCol.fields.forEach((field, fieldIndex) => {
+        const setting = {
+          columnId: `rel_${relCol.id}_${fieldIndex}`,
+          columnName: field.displayName || `rel_${relCol.id}_${fieldIndex}`,
           isVisible: true,
-          order: index
-        });
+          order: orderIndex++
+        };
+        settings.push(setting);
       });
+    });
+
+        // Simple Relationship Columns - Skip these as they are only informative
+        // and don't contain actual data (they always show '-')
+        // const tableRelationships = relationships.filter(rel => 
+        //   rel.fromTableId === table.id || rel.toTableId === table.id
+        // );
+        // 
+        // tableRelationships.forEach(rel => {
+        //   const columnName = rel.name || `rel_${rel.id}`;
+        //   const setting = {
+        //     columnId: `rel_${rel.id}`,
+        //     columnName: columnName,
+        //     isVisible: true,
+        //     order: orderIndex++
+        //   };
+        //   settings.push(setting);
+        // });
 
     return settings;
   }

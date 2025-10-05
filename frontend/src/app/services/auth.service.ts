@@ -1,7 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { Router } from '@angular/router';
 import { SupabaseService } from './supabase.service';
-import { ThemeService } from './theme.service';
 import { BehaviorSubject, Observable, from, of } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
 
@@ -29,13 +28,13 @@ export class AuthService {
   private authState = signal<AuthState>({
     user: null,
     isAuthenticated: false,
-    isLoading: true,
+    isLoading: false, // Start as not loading to prevent initial authentication
     error: null
   });
 
   // Computed signals for reactive state
   user = computed(() => this.authState().user);
-  isAuthenticated = computed(() => this.authState().isAuthenticated);
+  isAuthenticated = computed(() => this.hasBeenInitialized && this.authState().isAuthenticated);
   isLoading = computed(() => this.authState().isLoading);
   error = computed(() => this.authState().error);
 
@@ -46,18 +45,25 @@ export class AuthService {
   // Guard to prevent duplicate profile loads
   private isLoadingProfile = false;
   private lastLoadedUserId: string | null = null;
+  private hasBeenInitialized = false;
 
   constructor(
     private supabase: SupabaseService,
-    private router: Router,
-    private themeService: ThemeService
+    private router: Router
   ) {
+    // Initialize auth automatically to restore session on page reload
     this.initializeAuth();
   }
 
   private async initializeAuth() {
     try {
-      console.log('Initializing authentication...');
+      console.log('🔐 Initializing authentication...');
+      this.updateAuthState({ 
+        user: null, 
+        isAuthenticated: false, 
+        isLoading: true, 
+        error: null 
+      });
       
       // Check for existing session
       const { data: { session }, error } = await this.supabase.client.auth.getSession();
@@ -70,14 +76,15 @@ export class AuthService {
           isLoading: false, 
           error: error.message 
         });
+        this.hasBeenInitialized = true;
         return;
       }
 
       if (session?.user) {
-        console.log('Found existing session:', session.user.email);
+        console.log('✅ Found existing session:', session.user.email);
         await this.loadUserProfile(session.user.id);
       } else {
-        console.log('No existing session found');
+        console.log('❌ No existing session found');
         this.updateAuthState({ 
           user: null, 
           isAuthenticated: false, 
@@ -85,6 +92,8 @@ export class AuthService {
           error: null 
         });
       }
+      
+      this.hasBeenInitialized = true;
 
       // Listen for auth changes
       this.supabase.client.auth.onAuthStateChange(async (event, session) => {
@@ -170,10 +179,7 @@ export class AuthService {
           error: null 
         });
         
-        // Apply user's preferred theme
-        if (data.theme_id) {
-          this.themeService.setTheme(data.theme_id);
-        }
+        // Note: Theme will be applied by ThemeService when it detects user authentication
       } else {
         console.warn('⚠️ No user profile found for:', userId);
         console.warn('User exists in auth.users but not in public.users table');
@@ -216,6 +222,11 @@ export class AuthService {
     try {
       console.log('Attempting to sign in:', email);
       this.updateAuthState({ isLoading: true, error: null });
+
+      // Initialize auth manually if not already done
+      if (!this.hasBeenInitialized) {
+        await this.initializeAuthManually();
+      }
 
       const { data, error } = await this.supabase.client.auth.signInWithPassword({
         email,
@@ -380,9 +391,7 @@ export class AuthService {
       const updatedUser = { ...currentUser, theme_id: themeId };
       this.updateAuthState({ user: updatedUser });
 
-      // Apply the theme
-      this.themeService.setTheme(themeId);
-
+      // Note: Theme will be applied by ThemeService when it detects the user update
       return { success: true };
     } catch (error) {
       console.error('Error updating user theme:', error);
@@ -397,11 +406,21 @@ export class AuthService {
       // Reset guards
       this.lastLoadedUserId = null;
       this.isLoadingProfile = false;
+      this.hasBeenInitialized = false;
       
       await this.supabase.client.auth.signOut();
       this.router.navigate(['/login']);
     } catch (error) {
       console.error('Error signing out:', error);
+    }
+  }
+
+  /**
+   * Manually initialize authentication (call this when needed)
+   */
+  async initializeAuthManually(): Promise<void> {
+    if (!this.hasBeenInitialized) {
+      await this.initializeAuth();
     }
   }
 

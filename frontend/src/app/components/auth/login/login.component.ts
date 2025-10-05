@@ -1,8 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
@@ -11,6 +9,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { Router } from '@angular/router';
 import { AuthService } from '../../../services/auth.service';
+import { ModernInputComponent } from '../../modern-input/modern-input.component';
 
 @Component({
   selector: 'app-login',
@@ -18,14 +17,13 @@ import { AuthService } from '../../../services/auth.service';
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    MatFormFieldModule,
-    MatInputModule,
     MatButtonModule,
     MatCardModule,
     MatIconModule,
     MatTabsModule,
     MatProgressSpinnerModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    ModernInputComponent
   ],
   template: `
     <div class="login-container">
@@ -36,35 +34,75 @@ import { AuthService } from '../../../services/auth.service';
           <p>Database Schema Designer</p>
         </div>
 
-        <mat-tab-group class="auth-tabs" [(selectedIndex)]="selectedTab">
+        <!-- Loading State -->
+        <div *ngIf="isLoadingSuccess" class="loading-success-state">
+          <div class="success-animation">
+            <div class="checkmark-circle">
+              <mat-icon class="checkmark">check</mat-icon>
+            </div>
+            <div class="loading-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+          <h2 class="welcome-message">Welcome back!</h2>
+          <p class="loading-text">Preparing your dashboard...</p>
+        </div>
+
+        <!-- Auth Forms -->
+        <div *ngIf="!isLoadingSuccess" class="auth-forms-container">
+          <mat-tab-group class="auth-tabs" [(selectedIndex)]="selectedTab">
           <!-- Login Tab -->
           <mat-tab label="Sign In">
             <form [formGroup]="loginForm" (ngSubmit)="onLogin()" class="auth-form">
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Email</mat-label>
-                <input matInput type="email" formControlName="email" placeholder="Enter your email">
-                <mat-icon matSuffix>email</mat-icon>
-                <mat-error *ngIf="loginForm.get('email')?.hasError('required')">
+              <div class="input-group">
+                <label class="input-label">Email</label>
+                <app-modern-input
+                  [value]="loginForm.get('email')?.value || ''"
+                  (valueChange)="loginForm.get('email')?.setValue($event)"
+                  [config]="{
+                    type: 'email',
+                    placeholder: 'Enter your email',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'email',
+                    maxLength: 50
+                  }"
+                  class="full-width">
+                </app-modern-input>
+                <div class="error-message" *ngIf="loginForm.get('email')?.hasError('required') && loginForm.get('email')?.touched">
                   Email is required
-                </mat-error>
-                <mat-error *ngIf="loginForm.get('email')?.hasError('email')">
+                </div>
+                <div class="error-message" *ngIf="loginForm.get('email')?.hasError('email') && loginForm.get('email')?.touched">
                   Please enter a valid email
-                </mat-error>
-              </mat-form-field>
+                </div>
+              </div>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Password</mat-label>
-                <input matInput [type]="hideLoginPassword ? 'password' : 'text'" formControlName="password" placeholder="Enter your password">
-                <button mat-icon-button matSuffix type="button" (click)="hideLoginPassword = !hideLoginPassword">
-                  <mat-icon>{{hideLoginPassword ? 'visibility_off' : 'visibility'}}</mat-icon>
-                </button>
-                <mat-error *ngIf="loginForm.get('password')?.hasError('required')">
+              <div class="input-group">
+                <label class="input-label">Password</label>
+                <app-modern-input
+                  [value]="loginForm.get('password')?.value || ''"
+                  (valueChange)="loginForm.get('password')?.setValue($event)"
+                  [config]="{
+                    type: hideLoginPassword ? 'password' : 'text',
+                    placeholder: 'Enter your password',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'lock',
+                    showPasswordToggle: true,
+                    maxLength: 50
+                  }"
+                  (passwordToggle)="hideLoginPassword = !hideLoginPassword"
+                  class="full-width">
+                </app-modern-input>
+                <div class="error-message" *ngIf="loginForm.get('password')?.hasError('required') && loginForm.get('password')?.touched">
                   Password is required
-                </mat-error>
-                <mat-error *ngIf="loginForm.get('password')?.hasError('minlength')">
+                </div>
+                <div class="error-message" *ngIf="loginForm.get('password')?.hasError('minlength') && loginForm.get('password')?.touched">
                   Password must be at least 6 characters
-                </mat-error>
-              </mat-form-field>
+                </div>
+              </div>
 
               <button mat-raised-button color="primary" type="submit" class="full-width auth-button" 
                       [disabled]="loginForm.invalid || authService.isLoading()">
@@ -77,51 +115,95 @@ import { AuthService } from '../../../services/auth.service';
           <!-- Sign Up Tab -->
           <mat-tab label="Sign Up">
             <form [formGroup]="signupForm" (ngSubmit)="onSignup()" class="auth-form">
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Email</mat-label>
-                <input matInput type="email" formControlName="email" placeholder="Enter your email">
-                <mat-icon matSuffix>email</mat-icon>
-                <mat-error *ngIf="signupForm.get('email')?.hasError('required')">
+              <div class="input-group">
+                <label class="input-label">Email</label>
+                <app-modern-input
+                  [value]="signupForm.get('email')?.value || ''"
+                  (valueChange)="signupForm.get('email')?.setValue($event)"
+                  [config]="{
+                    type: 'email',
+                    placeholder: 'Enter your email',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'email',
+                    maxLength: 50
+                  }"
+                  class="full-width">
+                </app-modern-input>
+                <div class="error-message" *ngIf="signupForm.get('email')?.hasError('required') && signupForm.get('email')?.touched">
                   Email is required
-                </mat-error>
-                <mat-error *ngIf="signupForm.get('email')?.hasError('email')">
+                </div>
+                <div class="error-message" *ngIf="signupForm.get('email')?.hasError('email') && signupForm.get('email')?.touched">
                   Please enter a valid email
-                </mat-error>
-              </mat-form-field>
+                </div>
+              </div>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Password</mat-label>
-                <input matInput [type]="hideSignupPassword ? 'password' : 'text'" formControlName="password" placeholder="Enter your password">
-                <button mat-icon-button matSuffix type="button" (click)="hideSignupPassword = !hideSignupPassword">
-                  <mat-icon>{{hideSignupPassword ? 'visibility_off' : 'visibility'}}</mat-icon>
-                </button>
-                <mat-error *ngIf="signupForm.get('password')?.hasError('required')">
+              <div class="input-group">
+                <label class="input-label">Password</label>
+                <app-modern-input
+                  [value]="signupForm.get('password')?.value || ''"
+                  (valueChange)="signupForm.get('password')?.setValue($event)"
+                  [config]="{
+                    type: hideSignupPassword ? 'password' : 'text',
+                    placeholder: 'Enter your password',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'lock',
+                    showPasswordToggle: true,
+                    maxLength: 50
+                  }"
+                  (passwordToggle)="hideSignupPassword = !hideSignupPassword"
+                  class="full-width">
+                </app-modern-input>
+                <div class="error-message" *ngIf="signupForm.get('password')?.hasError('required') && signupForm.get('password')?.touched">
                   Password is required
-                </mat-error>
-                <mat-error *ngIf="signupForm.get('password')?.hasError('minlength')">
+                </div>
+                <div class="error-message" *ngIf="signupForm.get('password')?.hasError('minlength') && signupForm.get('password')?.touched">
                   Password must be at least 6 characters
-                </mat-error>
-              </mat-form-field>
+                </div>
+              </div>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Confirm Password</mat-label>
-                <input matInput [type]="hideConfirmPassword ? 'password' : 'text'" formControlName="confirmPassword" placeholder="Confirm your password">
-                <button mat-icon-button matSuffix type="button" (click)="hideConfirmPassword = !hideConfirmPassword">
-                  <mat-icon>{{hideConfirmPassword ? 'visibility_off' : 'visibility'}}</mat-icon>
-                </button>
-                <mat-error *ngIf="signupForm.get('confirmPassword')?.hasError('required')">
+              <div class="input-group">
+                <label class="input-label">Confirm Password</label>
+                <app-modern-input
+                  [value]="signupForm.get('confirmPassword')?.value || ''"
+                  (valueChange)="signupForm.get('confirmPassword')?.setValue($event)"
+                  [config]="{
+                    type: hideConfirmPassword ? 'password' : 'text',
+                    placeholder: 'Confirm your password',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'lock',
+                    showPasswordToggle: true,
+                    maxLength: 50
+                  }"
+                  (passwordToggle)="hideConfirmPassword = !hideConfirmPassword"
+                  class="full-width">
+                </app-modern-input>
+                <div class="error-message" *ngIf="signupForm.get('confirmPassword')?.hasError('required') && signupForm.get('confirmPassword')?.touched">
                   Please confirm your password
-                </mat-error>
-                <mat-error *ngIf="signupForm.get('confirmPassword')?.hasError('passwordMismatch')">
+                </div>
+                <div class="error-message" *ngIf="signupForm.get('confirmPassword')?.hasError('passwordMismatch') && signupForm.get('confirmPassword')?.touched">
                   Passwords do not match
-                </mat-error>
-              </mat-form-field>
+                </div>
+              </div>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Organization Name (Optional)</mat-label>
-                <input matInput formControlName="organizationName" placeholder="Enter organization name">
-                <mat-icon matSuffix>business</mat-icon>
-              </mat-form-field>
+              <div class="input-group">
+                <label class="input-label">Organization Name (Optional)</label>
+                <app-modern-input
+                  [value]="signupForm.get('organizationName')?.value || ''"
+                  (valueChange)="signupForm.get('organizationName')?.setValue($event)"
+                  [config]="{
+                    type: 'text',
+                    placeholder: 'Enter organization name',
+                    size: 'medium',
+                    variant: 'outline',
+                    icon: 'business',
+                    maxLength: 50
+                  }"
+                  class="full-width">
+                </app-modern-input>
+              </div>
 
               <button mat-raised-button color="primary" type="submit" class="full-width auth-button" 
                       [disabled]="signupForm.invalid || authService.isLoading()">
@@ -130,12 +212,13 @@ import { AuthService } from '../../../services/auth.service';
               </button>
             </form>
           </mat-tab>
-        </mat-tab-group>
+          </mat-tab-group>
 
-        <!-- Error Display -->
-        <div *ngIf="authService.error()" class="error-message">
-          <mat-icon>error</mat-icon>
-          <span>{{ authService.error() }}</span>
+          <!-- Error Display -->
+          <div *ngIf="authService.error()" class="error-message">
+            <mat-icon>error</mat-icon>
+            <span>{{ authService.error() }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -148,6 +231,8 @@ import { AuthService } from '../../../services/auth.service';
       justify-content: center;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       padding: 20px;
+      box-sizing: border-box;
+      overflow-x: auto;
     }
 
     .login-card {
@@ -156,7 +241,10 @@ import { AuthService } from '../../../services/auth.service';
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
       padding: 40px;
       width: 100%;
-      max-width: 450px;
+      max-width: 600px;
+      min-width: 500px;
+      box-sizing: border-box;
+      overflow: hidden;
     }
 
     .login-header {
@@ -185,6 +273,134 @@ import { AuthService } from '../../../services/auth.service';
       font-size: 16px;
     }
 
+    /* Loading Success State */
+    .loading-success-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 40px;
+      text-align: center;
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    .success-animation {
+      position: relative;
+      margin-bottom: 32px;
+    }
+
+    .checkmark-circle {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      animation: checkmarkPop 0.8s ease-out 0.3s both;
+      box-shadow: 0 8px 24px rgba(76, 175, 80, 0.3);
+    }
+
+    .checkmark {
+      color: white;
+      font-size: 40px;
+      width: 40px;
+      height: 40px;
+      animation: checkmarkDraw 0.6s ease-out 0.8s both;
+    }
+
+    .loading-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .loading-dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #667eea;
+      animation: loadingDots 1.4s ease-in-out infinite both;
+    }
+
+    .loading-dots span:nth-child(1) {
+      animation-delay: -0.32s;
+    }
+
+    .loading-dots span:nth-child(2) {
+      animation-delay: -0.16s;
+    }
+
+    .welcome-message {
+      margin: 0 0 16px 0;
+      color: #333;
+      font-size: 24px;
+      font-weight: 600;
+      animation: fadeInUp 0.6s ease-out 0.4s both;
+    }
+
+    .loading-text {
+      margin: 0;
+      color: #666;
+      font-size: 16px;
+      animation: fadeInUp 0.6s ease-out 0.6s both;
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes checkmarkPop {
+      0% {
+        transform: scale(0);
+        opacity: 0;
+      }
+      50% {
+        transform: scale(1.1);
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    @keyframes checkmarkDraw {
+      0% {
+        transform: scale(0) rotate(45deg);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1) rotate(0deg);
+        opacity: 1;
+      }
+    }
+
+    @keyframes loadingDots {
+      0%, 80%, 100% {
+        transform: scale(0);
+        opacity: 0.5;
+      }
+      40% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    /* Auth Forms Container */
+    .auth-forms-container {
+      animation: fadeInUp 0.4s ease-out;
+    }
+
     .auth-tabs {
       margin-bottom: 24px;
     }
@@ -192,11 +408,32 @@ import { AuthService } from '../../../services/auth.service';
     .auth-form {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
+      width: 90%;
+      box-sizing: border-box;
+      margin-left: auto;
+      margin-right: auto;
+      padding-bottom: 5px;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .input-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 4px;
     }
 
     .full-width {
       width: 100%;
+      box-sizing: border-box;
     }
 
     .auth-button {
@@ -204,9 +441,27 @@ import { AuthService } from '../../../services/auth.service';
       font-size: 16px;
       font-weight: 500;
       margin-top: 8px;
+      width: 100%;
+      box-sizing: border-box;
     }
 
     .error-message {
+      font-size: 12px;
+      color: #d32f2f;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .error-message mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+
+    /* Global error message */
+    .error-message:not(.input-group .error-message) {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -216,26 +471,55 @@ import { AuthService } from '../../../services/auth.service';
       border-radius: 8px;
       border-left: 4px solid #f44336;
       margin-top: 16px;
+      font-size: 14px;
     }
 
-    .error-message mat-icon {
+    .error-message:not(.input-group .error-message) mat-icon {
       font-size: 20px;
       width: 20px;
       height: 20px;
     }
 
     /* Responsive */
-    @media (max-width: 480px) {
+    @media (max-width: 768px) {
       .login-container {
         padding: 16px;
       }
       
       .login-card {
-        padding: 24px;
+        padding: 32px;
+        max-width: 100%;
+        min-width: 400px;
       }
       
       .login-header h1 {
         font-size: 24px;
+      }
+
+      .auth-form {
+        gap: 12px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .login-card {
+        padding: 24px;
+        min-width: 350px;
+      }
+      
+      .login-header h1 {
+        font-size: 22px;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .login-card {
+        padding: 20px;
+        min-width: 320px;
+      }
+      
+      .login-header h1 {
+        font-size: 20px;
       }
     }
   `]
@@ -247,6 +531,7 @@ export class LoginComponent implements OnInit {
   hideLoginPassword = true;
   hideSignupPassword = true;
   hideConfirmPassword = true;
+  isLoadingSuccess = false;
 
   constructor(
     private fb: FormBuilder,
@@ -296,11 +581,13 @@ export class LoginComponent implements OnInit {
       const result = await this.authService.signIn(email, password);
       
       if (result.success) {
-        this.snackBar.open('Welcome back!', 'Close', {
-          duration: 3000,
-          panelClass: ['success-snackbar']
-        });
-        this.router.navigate(['/']);
+        // Show loading success state
+        this.isLoadingSuccess = true;
+        
+        // Wait for animation to complete, then navigate
+        setTimeout(() => {
+          this.router.navigate(['/']);
+        }, 2500); // 2.5 seconds to show the animation
       } else {
         this.snackBar.open(result.error || 'Login failed', 'Close', {
           duration: 5000,

@@ -25,9 +25,9 @@ body {
   // user's system settings.
   color-scheme: light;
 
-  // Use our custom theme variables instead of Angular Material's
-  background-color: var(--theme-background);
-  color: var(--theme-text-primary);
+  // Use default colors instead of theme variables to avoid applying themes globally
+  background-color: #ffffff;
+  color: #000000;
   font: var(--mat-sys-body-medium);
 
   // Reset the user agent margin.

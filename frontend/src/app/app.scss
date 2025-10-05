@@ -1,33 +1,11 @@
-/* You can add global styles to this file, and also import other style files */
-@import '../styles/themes.css';
-
+/* Global styles for the entire application */
 .app-container {
   min-height: 100vh;
-  background-color: var(--theme-background);
-  color: var(--theme-text-primary);
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-.theme-selector-container {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 1000;
-  background-color: var(--theme-background-paper);
-  border-radius: 50%;
-  box-shadow: 0 4px 12px var(--theme-card-shadow);
-  border: 1px solid var(--theme-border);
+  background-color: #ffffff;
+  color: #000000;
 }
 
 .main-content {
   width: 100%;
   min-height: 100vh;
-}
-
-/* Responsive design */
-@media (max-width: 768px) {
-  .theme-selector-container {
-    top: 10px;
-    right: 10px;
-  }
 }

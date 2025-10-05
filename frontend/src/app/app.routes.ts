@@ -4,27 +4,44 @@ import { LoginComponent } from './components/auth/login/login.component';
 import { DashboardComponent } from './components/dashboard/dashboard.component';
 import { ViewModeComponent } from './components/view-mode/view-mode.component';
 import { AuthGuard } from './guards/auth.guard';
+import { AuthenticatedLayoutComponent } from './modules/authenticated/authenticated-layout.component';
+import { PublicLayoutComponent } from './modules/public/public-layout.component';
 
 export const routes: Routes = [
   { path: '', redirectTo: '/dashboard', pathMatch: 'full' },
-  { 
-    path: 'dashboard', 
-    component: DashboardComponent,
-    canActivate: [AuthGuard]
+  
+  // Public routes (no themes)
+  {
+    path: '',
+    component: PublicLayoutComponent,
+    children: [
+      { 
+        path: 'login', 
+        component: LoginComponent 
+      }
+    ]
   },
-  { 
-    path: 'editor/:projectId', 
-    component: DiagramEditorComponent,
-    canActivate: [AuthGuard]
+  
+  // Authenticated routes (with themes)
+  {
+    path: '',
+    component: AuthenticatedLayoutComponent,
+    canActivate: [AuthGuard],
+    children: [
+      { 
+        path: 'dashboard', 
+        component: DashboardComponent
+      },
+      { 
+        path: 'editor/:projectId', 
+        component: DiagramEditorComponent
+      },
+      { 
+        path: 'view-mode/:projectId', 
+        component: ViewModeComponent
+      }
+    ]
   },
-  { 
-    path: 'view-mode/:projectId', 
-    component: ViewModeComponent,
-    canActivate: [AuthGuard]
-  },
-  { 
-    path: 'login', 
-    component: LoginComponent 
-  },
+  
   { path: '**', redirectTo: '/dashboard' }
 ];

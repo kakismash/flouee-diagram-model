@@ -3,6 +3,7 @@ import { SupabaseService } from './supabase.service';
 import { NotificationService } from './notification.service';
 import { AuthService } from './auth.service';
 import { Table, Relationship, RelationshipDisplayColumn } from '../models/table.model';
+import { TableView } from '../models/table-view.model';
 
 export interface Project {
   id: string;
@@ -19,6 +20,7 @@ export interface ProjectSchema {
   tables: Table[];
   relationships: Relationship[];
   relationshipDisplayColumns: RelationshipDisplayColumn[];
+  tableViews?: { [tableId: string]: TableView[] }; // Add table views to schema
   metadata: {
     name: string;
     description?: string;

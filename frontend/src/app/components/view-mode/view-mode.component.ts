@@ -19,6 +19,7 @@ import { SchemaTranslationService, ValidationResult } from '../../services/schem
 import { DataSimulationService, TableData } from '../../services/data-simulation.service';
 import { ProjectService } from '../../services/project.service';
 import { NotificationService } from '../../services/notification.service';
+import { ToolbarDataService } from '../../services/toolbar-data.service';
 import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.component';
 
 @Component({
@@ -40,31 +41,6 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
   ],
   template: `
     <div class="view-mode-container">
-      <!-- Header -->
-      <mat-toolbar class="view-mode-header">
-        <div class="header-content">
-          <div class="header-left">
-            <button mat-icon-button (click)="goBack()" matTooltip="Back to Editor">
-              <mat-icon>arrow_back</mat-icon>
-            </button>
-            <h2>{{ projectName() }}</h2>
-          </div>
-          <div class="header-right">
-            <mat-chip-set>
-              <mat-chip>{{ tables().length }} Tables</mat-chip>
-              <mat-chip>{{ relationships().length }} Relationships</mat-chip>
-              <mat-chip [color]="validationResult()?.isValid ? 'primary' : 'warn'">
-                {{ validationResult()?.isValid ? 'Valid' : 'Invalid' }}
-              </mat-chip>
-            </mat-chip-set>
-            <button mat-raised-button color="primary" (click)="exportSchema()">
-              <mat-icon>download</mat-icon>
-              Export
-            </button>
-          </div>
-        </div>
-      </mat-toolbar>
-
       <!-- Content -->
       <div class="view-mode-content">
         <div *ngIf="isLoading()" class="loading-container">
@@ -84,7 +60,7 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
 
         <div *ngIf="!isLoading() && tables().length > 0" class="tables-container">
           <mat-tab-group class="tables-tabs" animationDuration="300ms">
-            <mat-tab *ngFor="let table of tables()" [label]="table.name">
+            <mat-tab *ngFor="let table of tables(); trackBy: trackByTableId" [label]="table.name">
               <ng-template mat-tab-label>
                 <div class="tab-label">
                   <mat-icon>table_chart</mat-icon>
@@ -170,40 +146,11 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
     .view-mode-container {
       display: flex;
       flex-direction: column;
-      height: 100vh;
+      height: calc(100vh - 64px); // Subtract toolbar height
       background: var(--theme-background);
       color: var(--theme-text-primary);
     }
 
-    .view-mode-header {
-      background: var(--theme-background-paper);
-      box-shadow: 0 2px 4px var(--theme-card-shadow);
-      z-index: 1000;
-    }
-
-    .header-content {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .header-left h2 {
-      margin: 0;
-      color: var(--theme-text-primary);
-    }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
 
     .view-mode-content {
       flex: 1;
@@ -371,6 +318,7 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     private dataSimulationService: DataSimulationService,
     private tableViewService: TableViewService,
     private notificationService: NotificationService,
+    private toolbarDataService: ToolbarDataService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
     private route: ActivatedRoute,
@@ -379,10 +327,17 @@ export class ViewModeComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.loadProjectData();
+    
+    // Listen for view mode actions from the shared toolbar
+    window.addEventListener('view-mode-action', this.handleViewModeAction.bind(this) as EventListener);
+    
+    // Update shared toolbar with current data
+    this.updateSharedToolbar();
   }
 
   ngOnDestroy() {
-    // Cleanup if needed
+    // Remove event listener
+    window.removeEventListener('view-mode-action', this.handleViewModeAction.bind(this) as EventListener);
   }
 
   private async loadProjectData() {
@@ -412,7 +367,7 @@ export class ViewModeComponent implements OnInit, OnDestroy {
       this.relationshipDisplayColumns.set(project.schemaData.relationshipDisplayColumns || []);
       
       // Initialize views
-      this.initializeViews(project.schemaData.tables || [], (project.schemaData as any).tableViews || {});
+      await this.initializeViews(project.schemaData.tables || [], (project.schemaData as any).tableViews || {});
 
       // Validate schema
       const validation = this.schemaTranslationService.validateSchema(project.schemaData);
@@ -425,6 +380,9 @@ export class ViewModeComponent implements OnInit, OnDestroy {
       // Initialize simulated data
       const data = this.dataSimulationService.initializeData(project.schemaData);
       this.tableData.set(data);
+
+      // Update shared toolbar with loaded data
+      this.updateSharedToolbar();
 
       this.isLoading.set(false);
     } catch (error) {
@@ -522,28 +480,53 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     }
   }
 
+  private handleViewModeAction(event: Event) {
+    const customEvent = event as CustomEvent;
+    const action = customEvent.detail?.action;
+    switch (action) {
+      case 'export':
+        this.exportSchema();
+        break;
+    }
+  }
+
+  private updateSharedToolbar() {
+    // Update the shared toolbar with current data
+    this.toolbarDataService.updateData({
+      tableCount: this.tables().length,
+      relationshipCount: this.relationships().length,
+      isValid: this.validationResult()?.isValid ?? true
+    });
+  }
+
   // View management methods
-  private initializeViews(tables: Table[], existingViews?: { [tableId: string]: TableView[] }) {
+  private async initializeViews(tables: Table[], existingViews?: { [tableId: string]: TableView[] }) {
     const views: { [tableId: string]: TableView[] } = {};
     const activeViews: { [tableId: string]: string } = {};
 
     tables.forEach(table => {
-      if (existingViews && existingViews[table.id]) {
+      if (existingViews && existingViews[table.id] && existingViews[table.id].length > 0) {
+        // Use existing views
         views[table.id] = existingViews[table.id];
         // Set first view as active
-        if (views[table.id].length > 0) {
-          activeViews[table.id] = views[table.id][0].id;
-        }
-      } else {
-        // Create default view
-        const defaultView = this.tableViewService.createDefaultView(table);
-        views[table.id] = [defaultView];
-        activeViews[table.id] = defaultView.id;
-      }
+        activeViews[table.id] = views[table.id][0].id;
+           } else {
+             // Always create a default view if none exists
+             const defaultView = this.tableViewService.createDefaultView(
+               table, 
+               this.relationships(), 
+               this.relationshipDisplayColumns()
+             );
+             views[table.id] = [defaultView];
+             activeViews[table.id] = defaultView.id;
+           }
     });
 
     this.tableViews.set(views);
     this.activeViews.set(activeViews);
+    
+    // Save views to project if any default views were created
+    await this.saveViewsToProject();
   }
 
   getTableViews(tableId: string): TableView[] {
@@ -566,7 +549,7 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     });
   }
 
-  onViewCreated(view: TableView) {
+  async onViewCreated(view: TableView) {
     const currentViews = this.tableViews();
     const tableViews = currentViews[view.tableId] || [];
     
@@ -579,10 +562,10 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     this.onViewSelected(view);
     
     // Save to project
-    this.saveViewsToProject();
+    await this.saveViewsToProject();
   }
 
-  onViewUpdated(view: TableView) {
+  async onViewUpdated(view: TableView) {
     const currentViews = this.tableViews();
     const tableViews = currentViews[view.tableId] || [];
     
@@ -594,10 +577,10 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     });
 
     // Save to project
-    this.saveViewsToProject();
+    await this.saveViewsToProject();
   }
 
-  onViewDeleted(viewId: string) {
+  async onViewDeleted(viewId: string) {
     // Find the view to get tableId
     let tableId: string | null = null;
     const currentViews = this.tableViews();
@@ -629,13 +612,35 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     }
 
     // Save to project
-    this.saveViewsToProject();
+    await this.saveViewsToProject();
   }
 
-  private saveViewsToProject() {
-    // This would save the views to the project data
-    // For now, we'll just log it
-    console.log('Saving views:', this.tableViews());
+  private async saveViewsToProject() {
+    try {
+      const project = this.projectService.getCurrentProjectSync();
+      if (!project) {
+        console.warn('No current project to save views to');
+        return;
+      }
+
+      // Update project schema with table views
+      const updatedSchema = {
+        ...project.schemaData,
+        tableViews: this.tableViews()
+      };
+
+      // Save to project
+      await this.projectService.saveProject(updatedSchema);
+      console.log('Views saved to project successfully');
+    } catch (error) {
+      console.error('Error saving views to project:', error);
+      this.notificationService.showError('Failed to save views to project');
+    }
+  }
+
+  // TrackBy function to ensure proper table rendering order
+  trackByTableId(index: number, table: Table): string {
+    return table.id;
   }
 
   exportSchema() {

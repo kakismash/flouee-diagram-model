@@ -13,9 +13,8 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
-import { Table, Relationship, RelationshipDisplayColumn } from '../../models/table.model';
+import { Table, Relationship, RelationshipDisplayColumn, RelationshipDisplayField } from '../../models/table.model';
 import { TableView, ColumnViewSetting } from '../../models/table-view.model';
 import { TableViewService } from '../../services/table-view.service';
 import { DataSimulationService } from '../../services/data-simulation.service';
@@ -49,33 +48,11 @@ export interface DataChangeEvent {
     MatCheckboxModule,
     MatSnackBarModule,
     MatPaginatorModule,
-    ReactiveFormsModule,
     DragDropModule,
     ModernInputComponent
   ],
   template: `
     <div class="table-view-container" #tableContainer>
-      <!-- Table Header -->
-      <mat-card class="table-header">
-        <mat-card-header>
-          <div class="header-content">
-            <div class="header-left">
-              <mat-icon>table_chart</mat-icon>
-              <div>
-                <mat-card-title>{{ table.name }}</mat-card-title>
-                <mat-card-subtitle>{{ data.length }} records</mat-card-subtitle>
-              </div>
-            </div>
-            <div class="header-right">
-              <div class="pagination-info">
-                Showing {{ getDisplayedRange() }} of {{ totalRecords }} records
-              </div>
-            </div>
-          </div>
-        </mat-card-header>
-      </mat-card>
-
-
       <!-- Table Content -->
       <mat-card class="table-content" id="table-{{table.id}}">
         <!-- Floating Elements positioned relative to the table -->
@@ -101,21 +78,23 @@ export interface DataChangeEvent {
           </div>
 
           <!-- Floating Add Row Button -->
-          <button mat-fab 
+          <button mat-raised-button 
                   color="primary" 
                   (click)="addRecord()" 
                   matTooltip="Add New Row"
                   class="floating-add-btn">
             <mat-icon>add</mat-icon>
+            Add Record
           </button>
 
           <!-- Floating View Manager Button -->
-          <button mat-fab 
+          <button mat-raised-button 
                   color="primary" 
                   (click)="openViewManager()" 
                   matTooltip="Manage Views"
                   class="floating-view-btn">
             <mat-icon>view_module</mat-icon>
+            Views
           </button>
         </div>
         <!-- Single Table with Sticky Headers -->
@@ -128,7 +107,7 @@ export interface DataChangeEvent {
             <table mat-table [dataSource]="paginatedData" class="data-table">
             <!-- Regular Columns -->
 
-            <ng-container *ngFor="let column of regularColumns" [matColumnDef]="'reg_' + column.name">
+            <ng-container *ngFor="let column of regularColumns; trackBy: trackByColumnId" [matColumnDef]="'reg_' + column.name">
               <th mat-header-cell *matHeaderCellDef class="sticky-header">
                 <div class="column-header" 
                      cdkDrag 
@@ -199,8 +178,8 @@ export interface DataChangeEvent {
             </ng-container>
 
             <!-- Relationship Display Columns - Each field as separate column -->
-            <ng-container *ngFor="let relCol of relationshipDisplayColumns; let relIndex = index">
-              <ng-container *ngFor="let field of relCol.fields; let fieldIndex = index" 
+            <ng-container *ngFor="let relCol of relationshipDisplayColumns; trackBy: trackByRelationshipColumnId; let relIndex = index">
+              <ng-container *ngFor="let field of relCol.fields; trackBy: trackByFieldIndex; let fieldIndex = index" 
                            [matColumnDef]="'rel_' + relCol.id + '_' + fieldIndex">
                 <th mat-header-cell *matHeaderCellDef class="sticky-header">
                   <div class="column-header relationship-header" 
@@ -237,7 +216,7 @@ export interface DataChangeEvent {
                         <mat-select [value]="editingValue()"
                                     (blur)="saveEditRelationship(i, relCol, field, element)"
                                     (selectionChange)="updateEditingValue($event)">
-                          <mat-option *ngFor="let option of getRelationshipOptions(relCol)" [value]="option.value">
+                          <mat-option *ngFor="let option of getRelationshipOptions(relCol); trackBy: trackByOptionValue" [value]="option.value">
                             {{ option.label }}
                           </mat-option>
                         </mat-select>
@@ -249,7 +228,7 @@ export interface DataChangeEvent {
             </ng-container>
 
             <!-- Simple Relationship Columns -->
-            <ng-container *ngFor="let rel of relationships" [matColumnDef]="rel.name || 'rel_' + rel.id">
+            <ng-container *ngFor="let rel of relationships; trackBy: trackByRelationshipId" [matColumnDef]="rel.name || 'rel_' + rel.id">
               <th mat-header-cell *matHeaderCellDef class="sticky-header">
                 <div class="column-header">
                   <span class="column-name">{{ rel.name || 'rel_' + rel.id }}</span>
@@ -274,7 +253,7 @@ export interface DataChangeEvent {
                                 (selectionChange)="editingValue.set($event.value)"
                                 (blur)="saveEdit(i, rel.name || 'rel_' + rel.id)"
                                 (keydown.escape)="cancelEdit()">
-                      <mat-option *ngFor="let option of getSimpleRelationshipOptions(rel)" 
+                      <mat-option *ngFor="let option of getSimpleRelationshipOptions(rel); trackBy: trackByOptionValue" 
                                   [value]="option.value">
                         {{ option.label }}
                       </mat-option>
@@ -321,30 +300,79 @@ export interface DataChangeEvent {
             </ng-container>
 
             <!-- Custom View Columns -->
-            <ng-container *ngFor="let viewColumn of activeView?.columnSettings" [matColumnDef]="'view_' + viewColumn.columnName">
+            <ng-container *ngFor="let viewColumn of activeView?.columnSettings; trackBy: trackByViewColumnName" [matColumnDef]="'view_' + viewColumn.columnName">
               <th mat-header-cell *matHeaderCellDef class="sticky-header">
-                <div class="column-header">
-                  <span class="column-name">{{ viewColumn.columnName }}</span>
+                <div class="column-header" 
+                     cdkDrag 
+                     [cdkDragDisabled]="!activeView"
+                     [matTooltip]="activeView ? 'Drag to reorder column' : 'No view selected'"
+                     matTooltipPosition="below">
+                  <div class="column-header-content">
+                    <div class="column-info">
+                      <span *ngIf="!isEditingViewColumnName(viewColumn.columnId)" 
+                            class="column-name-editable"
+                            (click)="startEditViewColumnName(viewColumn.columnId, viewColumn.displayName || viewColumn.columnName)">
+                        {{ viewColumn.displayName || viewColumn.columnName }}
+                      </span>
+                      <app-modern-input *ngIf="isEditingViewColumnName(viewColumn.columnId)"
+                                        [config]="{
+                                          size: 'small',
+                                          variant: 'outline',
+                                          placeholder: 'Column display name',
+                                          maxLength: 50,
+                                          required: true
+                                        }"
+                                        [value]="editingColumnNameValue()"
+                                        (valueChange)="updateEditingColumnNameValue($event)"
+                                        (enter)="saveViewColumnName(viewColumn.columnId)"
+                                        (escape)="cancelEditColumnName()"
+                                        class="column-name-input">
+                      </app-modern-input>
+                      <div class="column-badges">
+                        <mat-chip *ngIf="isRegularColumn(viewColumn)" class="badge reg">REG</mat-chip>
+                        <mat-chip *ngIf="isRelationshipColumn(viewColumn)" class="badge rel">REL</mat-chip>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </th>
               <td mat-cell *matCellDef="let row; let i = index" 
-                  [class.editing]="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnName)"
-                  (click)="startEdit(i, 'view_' + viewColumn.columnName, row[viewColumn.columnName])">
+                  [class.editing]="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId)"
+                  (click)="startEditViewColumn(i, viewColumn, row)">
                 <div class="cell-content">
-                  <span *ngIf="editingCell()?.row !== i || editingCell()?.column !== ('view_' + viewColumn.columnName)">
-                    {{ row[viewColumn.columnName] || '-' }}
+                  <span *ngIf="editingCell()?.row !== i || editingCell()?.column !== ('view_' + viewColumn.columnId)">
+                    {{ getViewColumnValue(row, viewColumn) || '-' }}
                   </span>
+                  
+                  <!-- Regular Column Edit Input -->
                   <app-modern-input 
-                    *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnName)"
+                    *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId) && isRegularColumn(viewColumn)"
                     [value]="editingValue()"
                     (valueChange)="editingValue.set($event)"
-                    (blur)="saveEdit(i, 'view_' + viewColumn.columnName)"
-                    (keydown.enter)="saveEdit(i, 'view_' + viewColumn.columnName)"
+                    (blur)="saveEdit(i, 'view_' + viewColumn.columnId)"
+                    (keydown.enter)="saveEdit(i, 'view_' + viewColumn.columnId)"
                     (keydown.escape)="cancelEdit()"
                     [config]="{
                       size: 'small',
                       variant: 'outline',
                       placeholder: 'Enter value',
+                    }"
+                    class="cell-input">
+                  </app-modern-input>
+
+                  <!-- Relationship Column Edit Input -->
+                  <app-modern-input 
+                    *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId) && isRelationshipColumn(viewColumn)"
+                    [value]="editingValue()"
+                    (valueChange)="editingValue.set($event)"
+                    (blur)="saveEditViewRelationship(i, viewColumn)"
+                    (keydown.enter)="saveEditViewRelationship(i, viewColumn)"
+                    (keydown.escape)="cancelEdit()"
+                    [config]="{
+                      size: 'small',
+                      variant: 'outline',
+                      placeholder: 'Select value',
+                      type: 'text'
                     }"
                     class="cell-input">
                   </app-modern-input>
@@ -388,7 +416,7 @@ export interface DataChangeEvent {
         </mat-card-header>
         <mat-card-content>
           <div class="relationships-list">
-            <div *ngFor="let rel of relationships" class="relationship-item">
+            <div *ngFor="let rel of relationships; trackBy: trackByRelationshipItem" class="relationship-item">
               <div class="relationship-info">
                 <mat-icon>link</mat-icon>
                 <span>{{ getRelationshipDescription(rel) }}</span>
@@ -409,25 +437,6 @@ export interface DataChangeEvent {
       color: var(--theme-text-primary);
     }
 
-    .table-header .header-content {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .header-left mat-icon {
-      font-size: 32px;
-      width: 32px;
-      height: 32px;
-      color: var(--theme-primary);
-    }
 
     .table-content {
       overflow: hidden;
@@ -455,15 +464,15 @@ export interface DataChangeEvent {
     /* Floating Elements Container */
     .floating-elements-container {
       position: sticky;
-      top: 60px;
-      left: 20px;
+      top: 0px;
+      left: -57px;
+      padding: 6px;
       right: 20px;
       display: flex;
       justify-content: flex-start;
       align-items: flex-start;
       pointer-events: none;
       z-index: 1001;
-      margin-bottom: 20px;
       gap: 12px;
     }
 
@@ -481,16 +490,18 @@ export interface DataChangeEvent {
 
     /* Floating Action Buttons */
     .floating-add-btn {
-      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
-      color: var(--theme-on-primary-container);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-      border: 2px solid var(--theme-primary);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--theme-text-primary);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       transition: all 0.3s ease;
       position: relative;
       overflow: hidden;
-      width: 56px;
-      height: 56px;
-      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 12px 16px;
+      min-width: auto;
+      height: auto;
     }
 
     .floating-add-btn::before {
@@ -501,35 +512,40 @@ export interface DataChangeEvent {
       right: 0;
       bottom: 0;
       background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-      border-radius: 50%;
+      border-radius: 12px;
       pointer-events: none;
     }
 
     .floating-add-btn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      background: rgba(255, 255, 255, 0.15);
     }
 
     .floating-add-btn mat-icon {
+      margin-right: 8px;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: var(--theme-text-primary);
       position: relative;
       z-index: 1;
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-      color: var(--theme-on-primary-container);
     }
 
     .floating-view-btn {
-      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
-      color: var(--theme-on-primary-container);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-      border: 2px solid var(--theme-primary);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--theme-text-primary);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       transition: all 0.3s ease;
       position: relative;
       overflow: hidden;
-      width: 56px;
-      height: 56px;
-      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 12px 16px;
+      min-width: auto;
+      height: auto;
+      margin-left: 12px;
     }
 
     .floating-view-btn::before {
@@ -540,22 +556,24 @@ export interface DataChangeEvent {
       right: 0;
       bottom: 0;
       background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-      border-radius: 50%;
+      border-radius: 12px;
       pointer-events: none;
     }
 
     .floating-view-btn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      background: rgba(255, 255, 255, 0.15);
     }
 
     .floating-view-btn mat-icon {
+      margin-right: 8px;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: var(--theme-text-primary);
       position: relative;
       z-index: 1;
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-      color: var(--theme-on-primary-container);
     }
 
     /* Scrollable Table Content */
@@ -696,10 +714,35 @@ export interface DataChangeEvent {
       table-layout: auto;
     }
 
-    /* Responsive column widths - more flexible */
+    /* Responsive column widths */
     .data-table th,
     .data-table td {
       padding: 8px 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Specific column width constraints */
+    .data-table th[mat-header-cell]:nth-child(1),
+    .data-table td[mat-cell]:nth-child(1) {
+      width: 60px;
+      min-width: 60px;
+      max-width: 80px;
+    }
+
+    .data-table th[mat-header-cell]:nth-child(2),
+    .data-table td[mat-cell]:nth-child(2) {
+      width: 120px;
+      min-width: 120px;
+      max-width: 150px;
+    }
+
+    .data-table th[mat-header-cell]:nth-child(3),
+    .data-table td[mat-cell]:nth-child(3) {
+      width: 100px;
+      min-width: 100px;
+      max-width: 120px;
     }
 
     .column-header {
@@ -712,6 +755,9 @@ export interface DataChangeEvent {
       border: 2px solid transparent;
       transition: all 0.2s ease;
       min-height: 40px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .column-header:hover {
@@ -1031,11 +1077,20 @@ export interface DataChangeEvent {
       color: white;
     }
 
+    .badge.reg {
+      background: var(--theme-secondary);
+      color: white;
+    }
+
     .cell-content {
       padding: 4px 8px;
       color: var(--theme-text-primary);
       border-radius: 4px;
       transition: background-color 0.2s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
     }
 
     .primary-key {
@@ -1093,12 +1148,6 @@ export interface DataChangeEvent {
       border-radius: 4px;
     }
 
-    .relationship-info {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--theme-text-primary);
-    }
 
     .relationship-type-one-to-one {
       background: var(--theme-success);
@@ -1146,22 +1195,7 @@ export interface DataChangeEvent {
       width: 100%;
     }
 
-    .inline-field .mat-mdc-form-field-wrapper {
-      padding: 0;
-    }
 
-    .inline-field .mat-mdc-form-field-infix {
-      border: none;
-      padding: 0;
-    }
-
-    .inline-field input,
-    .inline-field .mat-mdc-select {
-      font-size: 14px;
-      padding: 4px 8px;
-      color: var(--theme-input-text);
-      background: var(--theme-input-background);
-    }
 
     /* Relationship column styles */
     .relationship-header {
@@ -1301,67 +1335,6 @@ export interface DataChangeEvent {
       overflow: hidden;
     }
 
-    .floating-add-btn::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-      border-radius: 50%;
-      pointer-events: none;
-    }
-
-    .floating-add-btn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-
-    .floating-add-btn mat-icon {
-      position: relative;
-      z-index: 1;
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-      color: var(--theme-on-primary-container);
-    }
-
-    .floating-view-btn {
-      background: linear-gradient(135deg, var(--theme-primary) 0%, var(--theme-primary-variant) 100%);
-      color: var(--theme-on-primary);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-      border: 2px solid var(--theme-primary);
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .floating-view-btn::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-      border-radius: 50%;
-      pointer-events: none;
-    }
-
-    .floating-view-btn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-
-    .floating-view-btn mat-icon {
-      position: relative;
-      z-index: 1;
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-      color: var(--theme-on-primary-container);
-    }
   `]
 })
 export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
@@ -1411,7 +1384,6 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
 
   constructor(
     private dialog: MatDialog,
-    private fb: FormBuilder,
     private snackBar: MatSnackBar,
     private tableViewService: TableViewService,
     private dataSimulationService: DataSimulationService
@@ -1442,7 +1414,7 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   private setupColumns() {
-    // Apply active view if available
+    // Always use active view (guaranteed to exist)
     let visibleColumns = this.table.columns;
     if (this.activeView) {
       visibleColumns = this.tableViewService.applyView(this.table, this.activeView);
@@ -1453,31 +1425,32 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
       !col.isSystemGenerated && !col.isForeignKey
     );
     
-    // Relationship display columns - each field as separate column
+    // Only show relationship columns if they are explicitly defined in the view
     const relationshipDisplayColumns: string[] = [];
-    this.relationshipDisplayColumns.forEach(relCol => {
-      relCol.fields.forEach((field, fieldIndex) => {
-        if (field.isVisible) {
-          relationshipDisplayColumns.push(`rel_${relCol.id}_${fieldIndex}`);
-        }
-      });
-    });
-    
-    // Simple relationship columns
     const simpleRelationshipColumns: string[] = [];
-    this.relationships.forEach(rel => {
-      const columnName = rel.name || `rel_${rel.id}`;
-      simpleRelationshipColumns.push(columnName);
-    });
     
-    // Custom view columns - only add if they don't duplicate regular columns
-    const customViewColumns: string[] = [];
-    if (this.activeView?.columnSettings) {
-      this.activeView.columnSettings.forEach(viewColumn => {
-        // Only add custom view columns that don't duplicate regular columns
-        const isDuplicate = this.regularColumns.some(regCol => regCol.name === viewColumn.columnName);
-        if (!isDuplicate) {
-          customViewColumns.push(viewColumn.columnName);
+    // Check if the view has custom column settings that include relationship columns
+    if (this.activeView && this.activeView.columnSettings) {
+      // Only add relationship columns if they are explicitly in the view settings
+      this.relationshipDisplayColumns.forEach(relCol => {
+        relCol.fields.forEach((field, fieldIndex) => {
+          const viewSetting = this.activeView!.columnSettings!.find(s => 
+            s.columnName === `rel_${relCol.id}_${fieldIndex}` || 
+            s.columnName === field.displayName
+          );
+          if (viewSetting && viewSetting.isVisible) {
+            relationshipDisplayColumns.push(`rel_${relCol.id}_${fieldIndex}`);
+          }
+        });
+      });
+      
+      this.relationships.forEach(rel => {
+        const columnName = rel.name || `rel_${rel.id}`;
+        const viewSetting = this.activeView!.columnSettings!.find(s => 
+          s.columnName === columnName
+        );
+        if (viewSetting && viewSetting.isVisible) {
+          simpleRelationshipColumns.push(columnName);
         }
       });
     }
@@ -1486,20 +1459,33 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     const allColumns = [
       ...this.regularColumns.map(col => 'reg_' + col.name),
       ...relationshipDisplayColumns,
-      ...simpleRelationshipColumns,
-      ...customViewColumns.map(col => 'view_' + col)
+      ...simpleRelationshipColumns
     ];
     
-    // Remove duplicates and add system columns
+    // If we have an active view with custom column settings, use those instead of regular columns
+    if (this.activeView?.columnSettings && this.activeView.columnSettings.length > 0) {
+      // Replace regular columns with custom view columns, sorted by order
+      const visibleColumns = this.activeView.columnSettings.filter(viewColumn => viewColumn.isVisible);
+      
+      const customViewColumns = visibleColumns
+        .sort((a, b) => a.order - b.order) // Sort by order field
+        .map(viewColumn => 'view_' + viewColumn.columnName);
+      
+      // Replace all columns with custom view columns only
+      allColumns.length = 0;
+      allColumns.push(...customViewColumns);
+    }
+    
+    // Remove duplicates
     this.displayedColumns = [
-      ...new Set(allColumns), // Remove duplicates
-      'actions'
+      ...new Set(allColumns) // Remove duplicates
     ];
     
     // Add multiselect column if in multiselect mode
     if (this.isMultiSelectMode()) {
       this.displayedColumns.push('multiselect');
     }
+    
     
   }
 
@@ -1819,6 +1805,161 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     this.editingColumnNameValue.set('');
   }
 
+  // View Column Name Editing Methods
+  isEditingViewColumnName(columnId: string): boolean {
+    return this.editingColumnName() === `view_${columnId}`;
+  }
+
+  startEditViewColumnName(columnId: string, currentDisplayName: string) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    this.editingColumnName.set(`view_${columnId}`);
+    this.editingColumnNameValue.set(currentDisplayName);
+  }
+
+  saveViewColumnName(columnId: string) {
+    const newDisplayName = this.editingColumnNameValue().trim();
+    if (newDisplayName && newDisplayName !== '' && this.activeView) {
+      // Find the view column setting and update its displayName
+      const viewColumn = this.activeView.columnSettings.find(col => col.columnId === columnId);
+      if (viewColumn) {
+        const oldDisplayName = viewColumn.displayName || viewColumn.columnName;
+        viewColumn.displayName = newDisplayName;
+        
+        // Emit view update event
+        this.viewUpdated.emit(this.activeView);
+
+        // Show notification
+        this.snackBar.open(`Column display name changed from "${oldDisplayName}" to "${newDisplayName}"`, 'Close', {
+          duration: 2000,
+          horizontalPosition: 'right',
+          verticalPosition: 'top'
+        });
+      }
+    }
+    this.cancelEditColumnName();
+  }
+
+  // Helper methods for column type detection
+  isRegularColumn(viewColumn: ColumnViewSetting): boolean {
+    // Regular columns don't start with 'rel_'
+    return !viewColumn.columnId.startsWith('rel_');
+  }
+
+  isRelationshipColumn(viewColumn: ColumnViewSetting): boolean {
+    // Relationship columns start with 'rel_'
+    return viewColumn.columnId.startsWith('rel_');
+  }
+
+  // Get options for relationship columns in view
+  getViewColumnOptions(viewColumn: ColumnViewSetting): { value: string; label: string }[] {
+    if (!viewColumn.columnId.startsWith('rel_')) {
+      return [];
+    }
+
+    // Handle relationship display columns
+    if (viewColumn.columnId.includes('_') && !viewColumn.columnId.endsWith(viewColumn.columnId.split('_')[1])) {
+      const relColId = viewColumn.columnId.split('_')[1];
+      const fieldIndex = parseInt(viewColumn.columnId.split('_')[2]);
+      const relCol = this.relationshipDisplayColumns.find(col => col.id === relColId);
+      if (relCol && relCol.fields[fieldIndex]) {
+        return this.getRelationshipOptionsForField(relCol, relCol.fields[fieldIndex]);
+      }
+    } else {
+      // Handle simple relationship columns
+      const relId = viewColumn.columnId.replace('rel_', '');
+      const rel = this.relationships.find(r => r.id === relId);
+      if (rel) {
+        return this.getSimpleRelationshipOptions(rel);
+      }
+    }
+
+    return [];
+  }
+
+  // Save relationship column edits in view
+  saveEditViewRelationship(rowIndex: number, viewColumn: ColumnViewSetting) {
+    const newValue = this.editingValue();
+    const element = this.paginatedData[rowIndex];
+    
+    if (viewColumn.columnId.includes('_') && !viewColumn.columnId.endsWith(viewColumn.columnId.split('_')[1])) {
+      // This is a relationship display column
+      const relColId = viewColumn.columnId.split('_')[1];
+      const fieldIndex = parseInt(viewColumn.columnId.split('_')[2]);
+      
+      const relCol = this.relationshipDisplayColumns.find(col => col.id === relColId);
+      if (relCol && relCol.fields[fieldIndex]) {
+        // Check if this is the primary key field (ID field)
+        const field = relCol.fields[fieldIndex];
+        const sourceTable = this.allTables.find(t => t.id === relCol.sourceTableId);
+        const fieldColumn = sourceTable?.columns.find(col => col.id === field.sourceColumnId);
+        
+        if (fieldColumn?.isPrimaryKey) {
+          // This is an ID field change - update all related fields for this relationship
+          this.updateAllRelationshipFields(rowIndex, relCol, newValue, element);
+        } else {
+          // Regular field change - just update this field
+          this.saveEditRelationship(rowIndex, relCol, field, element);
+        }
+      }
+    } else {
+      // This is a simple relationship column
+      const relId = viewColumn.columnId.replace('rel_', '');
+      const rel = this.relationships.find(r => r.id === relId);
+      if (rel) {
+        this.saveEdit(rowIndex, 'view_' + viewColumn.columnId);
+      }
+    }
+    
+    this.cancelEdit();
+  }
+
+  // Update all relationship fields when primary key changes
+  private updateAllRelationshipFields(rowIndex: number, relCol: RelationshipDisplayColumn, newId: string, element: any) {
+    // Find the source table data for the new ID
+    const sourceTable = this.allTables.find(t => t.id === relCol.sourceTableId);
+    const sourceTableData = this.allTableData[sourceTable?.name || ''];
+    const pkColumn = sourceTable?.columns.find(col => col.isPrimaryKey);
+    
+    if (!sourceTable || !sourceTableData || !pkColumn) {
+      return;
+    }
+    
+    // Find the record with the new ID
+    const newRecord = sourceTableData.find((record: any) => String(record[pkColumn.name]) === String(newId));
+    
+    if (!newRecord) {
+      console.warn(`Record with ID ${newId} not found in ${sourceTable.name}`);
+      return;
+    }
+    
+    // Update the foreign key in the current record
+    const fkColumn = this.table.columns.find(col => col.isForeignKey && col.referencedTableId === relCol.sourceTableId);
+    if (fkColumn) {
+      element[fkColumn.name] = newId;
+    }
+    
+    // Clear cache for all relationship values
+    this.relationshipValueCache.clear();
+    
+    // Emit the data change event
+    this.dataChanged.emit({
+      type: 'UPDATE',
+      table: this.table.name,
+      data: element,
+      id: element.id
+    });
+    
+    // Show notification
+    this.snackBar.open(`Updated all ${relCol.fields.length} relationship fields for ${sourceTable.name}`, 'Close', {
+      duration: 2000,
+      horizontalPosition: 'right',
+      verticalPosition: 'top'
+    });
+  }
+
   @HostListener('document:keydown', ['$event'])
   onKeyDown(event: KeyboardEvent) {
     if (event.key === 'Control' || event.ctrlKey) {
@@ -1975,7 +2116,6 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
 
   getSelectedCount(): number {
     const count = this.selectedRows().size;
-    console.log('getSelectedCount:', count, 'selectedRows:', this.selectedRows());
     return count;
   }
 
@@ -2193,8 +2333,13 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   getRelationshipOptions(relCol: RelationshipDisplayColumn): { value: string; label: string }[] {
-    // Create cache key
-    const cacheKey = `options_${relCol.id}`;
+    // Use the first field for backward compatibility
+    return this.getRelationshipOptionsForField(relCol, relCol.fields[0]);
+  }
+
+  getRelationshipOptionsForField(relCol: RelationshipDisplayColumn, field: RelationshipDisplayField): { value: string; label: string }[] {
+    // Create cache key including the specific field
+    const cacheKey = `options_${relCol.id}_${field.sourceColumnId}`;
     
     // Check cache first
     if (this.relationshipOptionsCache.has(cacheKey)) {
@@ -2216,27 +2361,26 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
         return result;
       }
       
-      // Get the primary key column and the first display field
+      // Get the primary key column and the specific field column
       const pkColumn = sourceTable.columns.find(col => col.isPrimaryKey);
-      const displayField = relCol.fields[0];
-      const displayColumn = sourceTable.columns.find(col => col.id === displayField?.sourceColumnId);
+      const fieldColumn = sourceTable.columns.find(col => col.id === field.sourceColumnId);
       
-      if (!pkColumn || !displayColumn) {
+      if (!pkColumn || !fieldColumn) {
         const result: { value: string; label: string }[] = [];
         this.relationshipOptionsCache.set(cacheKey, result);
         return result;
       }
       
-      // Return options based on actual data
+      // Return options based on actual data - use the specific field value
       const result = sourceTableData.map(record => ({
-        value: String(record[pkColumn.name]),
-        label: String(record[displayColumn.name] || record[pkColumn.name])
+        value: String(record[fieldColumn.name]), // Use the field's value as the option value
+        label: String(record[fieldColumn.name] || record[pkColumn.name])
       }));
       
       this.relationshipOptionsCache.set(cacheKey, result);
       return result;
     } catch (error) {
-      console.error('Error in getRelationshipOptions:', error);
+      console.error('Error in getRelationshipOptionsForField:', error);
       const result: { value: string; label: string }[] = [];
       this.relationshipOptionsCache.set(cacheKey, result);
       return result;
@@ -2295,11 +2439,6 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     this.updatePagination();
   }
 
-  getDisplayedRange(): string {
-    const startIndex = this.currentPage * this.pageSize + 1;
-    const endIndex = Math.min((this.currentPage + 1) * this.pageSize, this.totalRecords);
-    return `${startIndex}-${endIndex}`;
-  }
 
   // View management methods
   onViewSelected(view: TableView) {
@@ -2372,6 +2511,104 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
         return new Date().toISOString();
       default:
         return '';
+    }
+  }
+
+  // TrackBy functions to ensure proper rendering order
+  trackByColumnId(index: number, column: any): string {
+    return column.id || column.name;
+  }
+
+  trackByRelationshipColumnId(index: number, relCol: any): string {
+    return relCol.id;
+  }
+
+  trackByFieldIndex(index: number, field: any): number {
+    return index;
+  }
+
+  trackByRelationshipId(index: number, rel: any): string {
+    return rel.id;
+  }
+
+  trackByViewColumnName(index: number, viewColumn: any): string {
+    return viewColumn.columnName;
+  }
+
+  trackByOptionValue(index: number, option: any): any {
+    return option.value;
+  }
+
+  trackByRelationshipItem(index: number, rel: any): string {
+    return rel.id;
+  }
+
+  getViewColumnValue(row: any, viewColumn: any): string {
+    // Check if this is a regular column
+    if (!viewColumn.columnId.startsWith('rel_')) {
+      return row[viewColumn.columnName] || '-';
+    }
+    
+    // Handle relationship display columns
+    if (viewColumn.columnId.includes('_') && !viewColumn.columnId.endsWith(viewColumn.columnId.split('_')[1])) {
+      // This is a relationship display column (rel_xxx_0, rel_xxx_1, etc.)
+      const relColId = viewColumn.columnId.split('_')[1];
+      const fieldIndex = parseInt(viewColumn.columnId.split('_')[2]);
+      
+      const relCol = this.relationshipDisplayColumns.find(col => col.id === relColId);
+      if (relCol && relCol.fields[fieldIndex]) {
+        return this.getRelationshipValue(row, relCol, relCol.fields[fieldIndex]);
+      }
+    } else {
+      // This is a simple relationship column
+      const relId = viewColumn.columnId.replace('rel_', '');
+      const rel = this.relationships.find(r => r.id === relId);
+      if (rel) {
+        return this.getRelationshipDisplayValue(row[viewColumn.columnName], rel);
+      }
+    }
+    
+    return '-';
+  }
+
+  startEditViewColumn(rowIndex: number, viewColumn: any, row: any) {
+    // Prevent editing in multi-select mode only if Ctrl is pressed
+    if (this.isMultiSelectMode() && this.isCtrlPressed()) {
+      return;
+    }
+    
+    // Use columnId for unique identification
+    const columnIdentifier = 'view_' + viewColumn.columnId;
+    
+    // Check if this is a regular column
+    if (!viewColumn.columnId.startsWith('rel_')) {
+      this.startEdit(rowIndex, columnIdentifier, row[viewColumn.columnName]);
+      return;
+    }
+    
+    // Handle relationship columns - initialize editing state
+    this.editingCell.set({ row: rowIndex, column: columnIdentifier });
+    
+    if (viewColumn.columnId.includes('_') && !viewColumn.columnId.endsWith(viewColumn.columnId.split('_')[1])) {
+      // This is a relationship display column
+      const relColId = viewColumn.columnId.split('_')[1];
+      const fieldIndex = parseInt(viewColumn.columnId.split('_')[2]);
+      
+      const relCol = this.relationshipDisplayColumns.find(col => col.id === relColId);
+      if (relCol && relCol.fields[fieldIndex]) {
+        // Get current value for this relationship field
+        const currentValue = this.getRelationshipValue(row, relCol, relCol.fields[fieldIndex]);
+        this.editingValue.set(currentValue);
+      }
+    } else {
+      // This is a simple relationship column
+      const relId = viewColumn.columnId.replace('rel_', '');
+      const rel = this.relationships.find(r => r.id === relId);
+      if (rel) {
+        // Get current value for this relationship
+        const currentValue = this.getRelationshipDisplayValue(row[viewColumn.columnName], rel);
+        this.editingValue.set(currentValue);
+      }
     }
   }
 }
