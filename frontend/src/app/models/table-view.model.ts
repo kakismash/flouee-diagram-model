@@ -9,6 +9,13 @@ export interface TableView {
   updatedAt: Date;
 }
 
+export interface ColumnColor {
+  name: string;
+  value: string;
+  borderColor: string;
+  backgroundColor: string;
+}
+
 export interface ColumnViewSetting {
   columnId: string;
   columnName: string;

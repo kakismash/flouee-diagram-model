@@ -149,7 +149,137 @@ export interface RelationshipDialogData {
 
     mat-hint {
       font-size: 12px;
-      color: #666;
+      color: var(--theme-text-secondary);
+    }
+
+    /* Theme-aware form field styles */
+    ::ng-deep .mat-mdc-form-field {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper {
+      background-color: var(--theme-background-secondary);
+      border: 1px solid var(--theme-border);
+      border-radius: 8px;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-focus-overlay {
+      background-color: transparent;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-input-element {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-label {
+      color: var(--theme-text-secondary);
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-form-field-label {
+      color: var(--theme-primary);
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-text-field-wrapper {
+      border-color: var(--theme-primary);
+      box-shadow: 0 0 0 2px rgba(var(--theme-primary-rgb), 0.2);
+    }
+
+    /* Select dropdown styles */
+    ::ng-deep .mat-mdc-select {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-select-panel {
+      background-color: var(--theme-background-secondary);
+      border: 1px solid var(--theme-border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    ::ng-deep .mat-mdc-option {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-option:hover {
+      background-color: var(--theme-hover);
+    }
+
+    ::ng-deep .mat-mdc-option.mdc-list-item--selected {
+      background-color: var(--theme-primary);
+      color: var(--theme-text-on-primary);
+    }
+
+    /* Button styles */
+    ::ng-deep .mat-mdc-raised-button {
+      background-color: var(--theme-primary);
+      color: var(--theme-text-on-primary);
+    }
+
+    ::ng-deep .mat-mdc-raised-button:hover {
+      background-color: var(--theme-primary-dark);
+    }
+
+    /* Dialog title and header styling - Remove unwanted borders */
+    ::ng-deep mat-dialog-title {
+      color: var(--theme-text-primary) !important;
+      border-bottom: none !important;
+    }
+
+    /* Remove default Material dialog header border */
+    ::ng-deep .mat-mdc-dialog-title {
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mdc-dialog__title {
+      border-bottom: none !important;
+    }
+
+    /* Remove any default dividers between header and content */
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title::after {
+      display: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__title::after {
+      display: none !important;
+    }
+
+    /* Dialog content styling */
+    ::ng-deep mat-dialog-content {
+      color: var(--theme-text-primary) !important;
+      border-top: none !important;
+    }
+
+    /* Remove any default Material dialog borders and dividers */
+    ::ng-deep .mat-mdc-dialog-container {
+      border: 1px solid var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    /* Ensure no unwanted borders between dialog sections */
+    ::ng-deep .mat-mdc-dialog-container > * {
+      border: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-actions {
+      border: none !important;
+    }
+
+    /* Dialog actions styling */
+    ::ng-deep mat-dialog-actions {
+      background-color: var(--theme-background-secondary) !important;
+      border-top: 1px solid var(--theme-border) !important;
+      padding: 16px 24px !important;
     }
   `]
 })

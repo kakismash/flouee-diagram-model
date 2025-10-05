@@ -83,7 +83,8 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
                   (viewSelected)="onViewSelected($event)"
                   (viewCreated)="onViewCreated($event)"
                   (viewUpdated)="onViewUpdated($event)"
-                  (viewDeleted)="onViewDeleted($event)">
+                  (viewDeleted)="onViewDeleted($event)"
+                  (relationshipDisplayColumnsUpdated)="onRelationshipDisplayColumnsUpdated($event)">
                 </app-table-view>
               </div>
             </mat-tab>
@@ -455,15 +456,15 @@ export class ViewModeComponent implements OnInit, OnDestroy {
   }
 
   private handleDeleteRecord(event: DataChangeEvent) {
-    const tableData = this.tableData();
-    if (tableData[event.table]) {
-      const index = tableData[event.table].findIndex((record: any) => record.id === event.id);
-      if (index !== -1) {
-        tableData[event.table].splice(index, 1);
-        this.tableData.set({ ...tableData });
-        this.notificationService.showSuccess(`Record deleted from ${event.table}`);
-      }
-    }
+    console.log('🗑️ DEBUG VIEW MODE DELETE - handleDeleteRecord called:');
+    console.log('Event:', event);
+    console.log('Table:', event.table);
+    console.log('ID to delete:', event.id);
+    console.log('⚠️ SKIPPING deletion in ViewModeComponent - TableViewComponent already handles it');
+    
+    // Don't delete here - TableViewComponent already handles the deletion
+    // This prevents double deletion
+    this.notificationService.showSuccess(`Record deleted from ${event.table}`);
   }
 
   private handleSchemaUpdate(event: DataChangeEvent) {
@@ -665,5 +666,38 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     link.download = filename;
     link.click();
     window.URL.revokeObjectURL(url);
+  }
+
+  async onRelationshipDisplayColumnsUpdated(updatedColumns: RelationshipDisplayColumn[]) {
+    console.log('🎨 Relationship Display Columns Updated:', updatedColumns);
+    
+    // Update the relationship display columns in the project data
+    this.relationshipDisplayColumns.set(updatedColumns);
+    
+    // Save the updated project data
+    await this.saveRelationshipDisplayColumnsToProject(updatedColumns);
+  }
+
+  private async saveRelationshipDisplayColumnsToProject(updatedColumns: RelationshipDisplayColumn[]) {
+    try {
+      const project = this.projectService.getCurrentProjectSync();
+      if (!project) {
+        console.warn('No current project to save relationship display columns to');
+        return;
+      }
+
+      // Update project schema with relationship display columns
+      const updatedSchema = {
+        ...project.schemaData,
+        relationshipDisplayColumns: updatedColumns
+      };
+
+      // Save to project
+      await this.projectService.saveProject(updatedSchema);
+      console.log('Relationship display columns saved to project successfully');
+    } catch (error) {
+      console.error('Failed to save relationship display columns to project:', error);
+      this.notificationService.showError('Failed to save column colors');
+    }
   }
 }

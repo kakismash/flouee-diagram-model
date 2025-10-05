@@ -52,6 +52,13 @@ export interface RelationshipDisplayField {
   isVisible: boolean;
 }
 
+export interface ColumnColor {
+  name: string;
+  value: string;
+  borderColor: string;
+  backgroundColor: string;
+}
+
 export interface RelationshipDisplayColumn {
   id: string;
   relationshipId: string;
@@ -59,6 +66,7 @@ export interface RelationshipDisplayColumn {
   sourceTableId: string; // The table being referenced
   fields: RelationshipDisplayField[]; // Multiple fields to display
   isVisible: boolean;
+  color?: ColumnColor; // Color for all columns in this relationship
 }
 
 export interface Diagram {

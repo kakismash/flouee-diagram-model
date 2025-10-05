@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, effect, HostListener, ElementRef, ViewChild } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges, OnDestroy, SimpleChanges, signal, effect, HostListener, ElementRef, ViewChild, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatTableModule } from '@angular/material/table';
 import { MatCardModule } from '@angular/material/card';
@@ -21,6 +21,7 @@ import { DataSimulationService } from '../../services/data-simulation.service';
 import { ViewConfigDialogComponent } from '../view-config-dialog/view-config-dialog.component';
 import { DragDropModule, CdkDragDrop, moveItemInArray } from '@angular/cdk/drag-drop';
 import { ModernInputComponent } from '../modern-input/modern-input.component';
+import { ColumnContextMenuComponent, ColumnContextMenuData, ColumnColor } from '../column-context-menu/column-context-menu.component';
 
 export interface DataChangeEvent {
   type: 'CREATE' | 'UPDATE' | 'DELETE' | 'SCHEMA_UPDATE';
@@ -33,6 +34,7 @@ export interface DataChangeEvent {
 @Component({
   selector: 'app-table-view',
   standalone: true,
+  styleUrls: ['./relationship-dropdown.theme.scss'],
   imports: [
     CommonModule,
     MatTableModule,
@@ -49,7 +51,8 @@ export interface DataChangeEvent {
     MatSnackBarModule,
     MatPaginatorModule,
     DragDropModule,
-    ModernInputComponent
+    ModernInputComponent,
+    ColumnContextMenuComponent
   ],
   template: `
     <div class="table-view-container" #tableContainer>
@@ -78,8 +81,7 @@ export interface DataChangeEvent {
           </div>
 
           <!-- Floating Add Row Button -->
-          <button mat-raised-button 
-                  color="primary" 
+          <button mat-button 
                   (click)="addRecord()" 
                   matTooltip="Add New Row"
                   class="floating-add-btn">
@@ -88,8 +90,7 @@ export interface DataChangeEvent {
           </button>
 
           <!-- Floating View Manager Button -->
-          <button mat-raised-button 
-                  color="primary" 
+          <button mat-button 
                   (click)="openViewManager()" 
                   matTooltip="Manage Views"
                   class="floating-view-btn">
@@ -301,12 +302,19 @@ export interface DataChangeEvent {
 
             <!-- Custom View Columns -->
             <ng-container *ngFor="let viewColumn of activeView?.columnSettings; trackBy: trackByViewColumnName" [matColumnDef]="'view_' + viewColumn.columnName">
-              <th mat-header-cell *matHeaderCellDef class="sticky-header">
-                <div class="column-header" 
-                     cdkDrag 
-                     [cdkDragDisabled]="!activeView"
-                     [matTooltip]="activeView ? 'Drag to reorder column' : 'No view selected'"
-                     matTooltipPosition="below">
+              <th mat-header-cell *matHeaderCellDef class="sticky-header" 
+                  [style.border]="getColumnBorderStyle(viewColumn, true)"
+                  [style.background-color]="getColumnBackgroundColor(viewColumn)"
+                  [style.box-shadow]="getColumnNeonGlow(viewColumn)">
+                <app-column-context-menu 
+                    [data]="getColumnContextMenuData(viewColumn)"
+                    (colorSelected)="onColumnColorSelected($event)"
+                    (rightClick)="onColumnRightClick($event)">
+                  <div class="column-header" 
+                       cdkDrag 
+                       [cdkDragDisabled]="!activeView"
+                       [matTooltip]="activeView ? 'Drag to reorder column' : 'No view selected'"
+                       matTooltipPosition="below">
                   <div class="column-header-content">
                     <div class="column-info">
                       <span *ngIf="!isEditingViewColumnName(viewColumn.columnId)" 
@@ -333,11 +341,25 @@ export interface DataChangeEvent {
                         <mat-chip *ngIf="isRelationshipColumn(viewColumn)" class="badge rel">REL</mat-chip>
                       </div>
                     </div>
+                    <!-- Context menu trigger only for referenced columns -->
+                    <div *ngIf="isRelationshipColumn(viewColumn)" 
+                         class="context-menu-area"
+                         (contextmenu)="onColumnRightClick($event, viewColumn)"
+                         matTooltip="Right-click for color options"
+                         matTooltipPosition="below">
+                      <mat-icon class="context-menu-icon">more_vert</mat-icon>
+                    </div>
                   </div>
                 </div>
+                </app-column-context-menu>
               </th>
               <td mat-cell *matCellDef="let row; let i = index" 
                   [class.editing]="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId)"
+                  [style.border-left]="getColumnLeftBorder(viewColumn)"
+                  [style.border-right]="getColumnRightBorder(viewColumn)"
+                  [style.border-bottom]="getRowBottomBorder(i, viewColumn)"
+                  [style.background-color]="getColumnBackgroundColor(viewColumn)"
+                  [style.box-shadow]="getColumnNeonGlow(viewColumn) + (getRowBottomNeonGlow(i, viewColumn) !== 'none' ? ', ' + getRowBottomNeonGlow(i, viewColumn) : '')"
                   (click)="startEditViewColumn(i, viewColumn, row)">
                 <div class="cell-content">
                   <span *ngIf="editingCell()?.row !== i || editingCell()?.column !== ('view_' + viewColumn.columnId)">
@@ -360,22 +382,22 @@ export interface DataChangeEvent {
                     class="cell-input">
                   </app-modern-input>
 
-                  <!-- Relationship Column Edit Input -->
-                  <app-modern-input 
-                    *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId) && isRelationshipColumn(viewColumn)"
-                    [value]="editingValue()"
-                    (valueChange)="editingValue.set($event)"
-                    (blur)="saveEditViewRelationship(i, viewColumn)"
-                    (keydown.enter)="saveEditViewRelationship(i, viewColumn)"
-                    (keydown.escape)="cancelEdit()"
-                    [config]="{
-                      size: 'small',
-                      variant: 'outline',
-                      placeholder: 'Select value',
-                      type: 'text'
-                    }"
-                    class="cell-input">
-                  </app-modern-input>
+                  <!-- Relationship Column Edit Dropdown -->
+                  <div *ngIf="editingCell()?.row === i && editingCell()?.column === ('view_' + viewColumn.columnId) && isRelationshipColumn(viewColumn)"
+                       class="relationship-edit-dropdown">
+                    <mat-form-field appearance="outline" class="inline-field">
+                      <mat-select [value]="editingValue()"
+                                  (selectionChange)="editingValue.set($event.value)"
+                                  (blur)="saveEditViewRelationship(i, viewColumn)"
+                                  (keydown.escape)="cancelEdit()">
+                        <mat-option *ngFor="let option of getViewColumnOptions(viewColumn); trackBy: trackByOptionValue" 
+                                    [value]="option.value">
+                          {{ option.label }}
+                        </mat-option>
+                      </mat-select>
+                    </mat-form-field>
+                  </div>
+
                 </div>
               </td>
             </ng-container>
@@ -490,18 +512,18 @@ export interface DataChangeEvent {
 
     /* Floating Action Buttons */
     .floating-add-btn {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: var(--theme-text-primary);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-      border-radius: 12px;
-      padding: 12px 16px;
-      min-width: auto;
-      height: auto;
+      background: rgba(255, 255, 255, 0.15) !important;
+      backdrop-filter: blur(20px) !important;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      color: var(--theme-text-primary) !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+      transition: all 0.3s ease !important;
+      position: relative !important;
+      overflow: hidden !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      min-width: auto !important;
+      height: auto !important;
     }
 
     .floating-add-btn::before {
@@ -511,15 +533,21 @@ export interface DataChangeEvent {
       left: 0;
       right: 0;
       bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
       border-radius: 12px;
       pointer-events: none;
+      transition: all 0.3s ease;
     }
 
     .floating-add-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px) !important;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
+      background: rgba(255, 255, 255, 0.2) !important;
+    }
+
+    .floating-add-btn:hover::before {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%);
+      transform: scale(1.02);
     }
 
     .floating-add-btn mat-icon {
@@ -533,19 +561,19 @@ export interface DataChangeEvent {
     }
 
     .floating-view-btn {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: var(--theme-text-primary);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-      border-radius: 12px;
-      padding: 12px 16px;
-      min-width: auto;
-      height: auto;
-      margin-left: 12px;
+      background: rgba(255, 255, 255, 0.15) !important;
+      backdrop-filter: blur(20px) !important;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      color: var(--theme-text-primary) !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1) !important;
+      transition: all 0.3s ease !important;
+      position: relative !important;
+      overflow: hidden !important;
+      border-radius: 12px !important;
+      padding: 12px 16px !important;
+      min-width: auto !important;
+      height: auto !important;
+      margin-left: 12px !important;
     }
 
     .floating-view-btn::before {
@@ -555,15 +583,21 @@ export interface DataChangeEvent {
       left: 0;
       right: 0;
       bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
       border-radius: 12px;
       pointer-events: none;
+      transition: all 0.3s ease;
     }
 
     .floating-view-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px) !important;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
+      background: rgba(255, 255, 255, 0.2) !important;
+    }
+
+    .floating-view-btn:hover::before {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%);
+      transform: scale(1.02);
     }
 
     .floating-view-btn mat-icon {
@@ -602,17 +636,18 @@ export interface DataChangeEvent {
       display: flex;
       align-items: center;
       gap: 10px;
-      background: linear-gradient(135deg, var(--theme-primary-container) 0%, var(--theme-primary) 100%);
-      color: var(--theme-on-primary-container);
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: var(--theme-text-primary);
       padding: 12px 20px;
       border-radius: 25px;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-      border: 2px solid var(--theme-primary);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
       pointer-events: auto;
       animation: slideDown 0.3s ease-out;
-      backdrop-filter: blur(10px);
       position: relative;
       overflow: hidden;
+      transition: all 0.3s ease;
     }
 
     .selection-chip::before {
@@ -622,13 +657,25 @@ export interface DataChangeEvent {
       left: 0;
       right: 0;
       bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%);
       border-radius: 25px;
       pointer-events: none;
+      transition: all 0.3s ease;
+    }
+
+    .selection-chip:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .selection-chip:hover::before {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.15) 100%);
+      transform: scale(1.02);
     }
 
     .selection-chip mat-icon:first-child {
-      color: var(--theme-on-primary-container);
+      color: var(--theme-text-primary);
       font-size: 20px;
       width: 20px;
       height: 20px;
@@ -642,7 +689,7 @@ export interface DataChangeEvent {
       white-space: nowrap;
       position: relative;
       z-index: 1;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      color: var(--theme-text-primary);
     }
 
     .delete-selected-btn {
@@ -717,7 +764,7 @@ export interface DataChangeEvent {
     /* Responsive column widths */
     .data-table th,
     .data-table td {
-      padding: 8px 12px;
+      padding: 0px 12px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1052,6 +1099,57 @@ export interface DataChangeEvent {
       line-height: 16px;
     }
 
+    .context-menu-area {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      margin-left: 8px;
+    }
+
+    .context-menu-area:hover {
+      background-color: var(--theme-hover);
+    }
+
+    .context-menu-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      color: var(--theme-text-secondary);
+    }
+
+    .relationship-edit-dropdown {
+      width: 100%;
+    }
+
+    .relationship-edit-dropdown .inline-field {
+      width: 100%;
+    }
+
+    .relationship-edit-dropdown .mat-mdc-form-field {
+      width: 100%;
+    }
+
+    .relationship-edit-dropdown .mat-mdc-select {
+      width: 100%;
+    }
+
+
+    /* Error Snackbar Styles */
+    ::ng-deep .error-snackbar {
+      background-color: #f44336 !important;
+      color: white !important;
+    }
+
+    ::ng-deep .error-snackbar .mat-mdc-snack-bar-action {
+      color: white !important;
+    }
+
+
     .badge.pk {
       background: var(--theme-success);
       color: white;
@@ -1324,16 +1422,6 @@ export interface DataChangeEvent {
       color: var(--theme-text-primary) !important;
     }
 
-    /* Floating Action Buttons */
-    .floating-add-btn {
-      background: linear-gradient(135deg, var(--theme-primary) 0%, var(--theme-primary-variant) 100%);
-      color: var(--theme-on-primary);
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
-      border: 2px solid var(--theme-primary);
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
 
   `]
 })
@@ -1352,6 +1440,7 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
   @Output() viewCreated = new EventEmitter<TableView>();
   @Output() viewUpdated = new EventEmitter<TableView>();
   @Output() viewDeleted = new EventEmitter<string>();
+  @Output() relationshipDisplayColumnsUpdated = new EventEmitter<RelationshipDisplayColumn[]>();
 
   @ViewChild('tableContainer', { static: false }) tableContainer!: ElementRef;
 
@@ -1386,7 +1475,8 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     private dialog: MatDialog,
     private snackBar: MatSnackBar,
     private tableViewService: TableViewService,
-    private dataSimulationService: DataSimulationService
+    private dataSimulationService: DataSimulationService,
+    private cdr: ChangeDetectorRef
   ) {
   }
 
@@ -1545,6 +1635,12 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
       
       this.saveColumnOrderToCurrentView();
     }
+    
+    // Recalcular efectos de agrupación después del drag and drop
+    // Usar setTimeout para asegurar que se ejecute después del guardado
+    setTimeout(() => {
+      this.recalculateGroupingEffects();
+    }, 100);
   }
 
   private updateDisplayedColumnsOrder() {
@@ -1559,11 +1655,21 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     ];
   }
 
+  private recalculateGroupingEffects() {
+    // Forzar la detección de cambios en Angular para recalcular los efectos
+    // Esto asegura que los métodos de border y neon se ejecuten con el nuevo orden
+    this.cdr.detectChanges();
+  }
+
   private saveColumnOrderToCurrentView() {
     if (!this.activeView) {
       // If no active view, don't auto-save
       return;
     }
+
+    console.log('🔧 DEBUG: saveColumnOrderToCurrentView called');
+    console.log('📊 Current displayedColumns:', this.displayedColumns);
+    console.log('📋 Current regularColumns:', this.regularColumns.map(c => c.name));
 
     // If it's a default view, we need to create column settings first
     if (this.activeView.isDefault) {
@@ -1592,16 +1698,55 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
       settingsMap.set(setting.columnId, setting);
     });
 
-    // Update the order for each regular column based on its current position
-    this.regularColumns.forEach((column, index) => {
-      const setting = settingsMap.get(column.id);
+    console.log('🗺️ Settings map before update:', Array.from(settingsMap.entries()));
+
+    // Update the order for ALL columns based on their current position in displayedColumns
+    this.displayedColumns.forEach((columnName, index) => {
+      // Skip 'actions' column
+      if (columnName === 'actions') return;
+      
+      // Find the setting for this column
+      let setting: ColumnViewSetting | undefined;
+      
+      if (columnName.startsWith('view_')) {
+        // This is a view column (either regular or relationship)
+        // Extract the actual column name from view_columnName
+        const actualColumnName = columnName.replace('view_', '');
+        
+        // Check if it's a relationship column by looking for the pattern
+        if (actualColumnName.includes(' ')) {
+          // This is a relationship column, find by columnName
+          setting = this.activeView!.columnSettings!.find(s => s.columnName === actualColumnName);
+        } else {
+          // This is a regular column, find by columnId
+          const column = this.regularColumns.find(c => c.name === actualColumnName);
+          if (column) {
+            setting = settingsMap.get(column.id);
+          }
+        }
+      } else if (columnName.startsWith('rel_')) {
+        // This is a relationship column (old format)
+        setting = this.activeView!.columnSettings!.find(s => s.columnId === columnName);
+      } else {
+        // This is a regular column (old format)
+        const column = this.regularColumns.find(c => c.name === columnName);
+        if (column) {
+          setting = settingsMap.get(column.id);
+        }
+      }
+      
       if (setting) {
+        console.log(`📝 Updating order for ${columnName}: ${setting.order} → ${index}`);
         setting.order = index;
+      } else {
+        console.warn(`⚠️ No setting found for column: ${columnName}`);
       }
     });
 
     // Sort column settings by new order to maintain consistency
     this.activeView.columnSettings!.sort((a, b) => a.order - b.order);
+
+    console.log('✅ Final column settings order:', this.activeView.columnSettings!.map(s => `${s.columnName} (${s.order})`));
 
     // Update the timestamp
     this.activeView.updatedAt = new Date();
@@ -1897,6 +2042,24 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
         const fieldColumn = sourceTable?.columns.find(col => col.id === field.sourceColumnId);
         
         if (fieldColumn?.isPrimaryKey) {
+          // Find the relationship for validation
+          const relationship = this.relationships.find(r => r.id === relCol.relationshipId);
+          
+          // Validate cardinality before updating
+          if (relationship) {
+            const validationResult = this.validateRelationshipCardinality(relationship, newValue, element);
+            
+            if (!validationResult.isValid) {
+              this.snackBar.open(validationResult.message, 'Close', {
+                duration: 4000,
+                horizontalPosition: 'right',
+                verticalPosition: 'top',
+                panelClass: ['error-snackbar']
+              });
+              return; // Don't update if validation fails
+            }
+          }
+          
           // This is an ID field change - update all related fields for this relationship
           this.updateAllRelationshipFields(rowIndex, relCol, newValue, element);
         } else {
@@ -1909,6 +2072,19 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
       const relId = viewColumn.columnId.replace('rel_', '');
       const rel = this.relationships.find(r => r.id === relId);
       if (rel) {
+        // Validate cardinality for simple relationships
+        const validationResult = this.validateRelationshipCardinality(rel, newValue, element);
+        
+        if (!validationResult.isValid) {
+          this.snackBar.open(validationResult.message, 'Close', {
+            duration: 4000,
+            horizontalPosition: 'right',
+            verticalPosition: 'top',
+            panelClass: ['error-snackbar']
+          });
+          return; // Don't update if validation fails
+        }
+        
         this.saveEdit(rowIndex, 'view_' + viewColumn.columnId);
       }
     }
@@ -2089,12 +2265,20 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     const currentSelected = this.selectedRows();
     const newSelected = new Set(currentSelected);
     
+    console.log('🔍 DEBUG SELECTION - Toggle row selection:');
+    console.log('Row index:', rowIndex);
+    console.log('Current selected:', Array.from(currentSelected));
+    console.log('Is currently selected:', newSelected.has(rowIndex));
+    
     if (newSelected.has(rowIndex)) {
       newSelected.delete(rowIndex);
+      console.log('Removed from selection');
     } else {
       newSelected.add(rowIndex);
+      console.log('Added to selection');
     }
     
+    console.log('New selected:', Array.from(newSelected));
     this.selectedRows.set(newSelected);
   }
 
@@ -2186,12 +2370,36 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
 
 
   deleteSelectedRows() {
+    console.log('🚀 DEBUG DELETE - Method called at:', new Date().toISOString());
+    console.log('🚀 DEBUG DELETE - Call stack:', new Error().stack);
+    
     const selectedIndices = Array.from(this.selectedRows()).sort((a, b) => b - a); // Sort descending to delete from end
     
-    selectedIndices.forEach(index => {
+    console.log('🔍 DEBUG DELETE - Initial state:');
+    console.log('Selected indices (page-relative):', selectedIndices);
+    console.log('Current page:', this.currentPage);
+    console.log('Page size:', this.pageSize);
+    console.log('Total data length:', this.data.length);
+    console.log('Data before deletion:', this.data.map((item, idx) => ({ index: idx, id: item.id, data: item })));
+    
+    // Collect all elements to delete first
+    const elementsToDelete = selectedIndices.map(index => {
       const globalIndex = this.currentPage * this.pageSize + index;
-      const element = this.data[globalIndex];
-      
+      return {
+        element: this.data[globalIndex],
+        globalIndex: globalIndex,
+        pageIndex: index
+      };
+    });
+    
+    console.log('🔍 DEBUG DELETE - Elements to delete:');
+    elementsToDelete.forEach(({ element, globalIndex, pageIndex }) => {
+      console.log(`Page index ${pageIndex} -> Global index ${globalIndex}:`, element);
+    });
+    
+    // Delete elements from end to beginning to maintain correct indices
+    elementsToDelete.forEach(({ element, globalIndex }) => {
+      console.log(`🗑️ Emitting delete event for global index ${globalIndex}:`, element);
       // Emit delete event
       this.dataChanged.emit({
         type: 'DELETE',
@@ -2199,10 +2407,18 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
         data: element,
         id: element.id || globalIndex
       });
-      
-      // Remove from local data
-      this.data.splice(globalIndex, 1);
     });
+    
+    // Remove from local data (from end to beginning to maintain indices)
+    console.log('🔍 DEBUG DELETE - Removing from local data:');
+    elementsToDelete.forEach(({ globalIndex, element }) => {
+      console.log(`Removing at global index ${globalIndex}:`, element);
+      this.data.splice(globalIndex, 1);
+      console.log(`Data after removal:`, this.data.map((item, idx) => ({ index: idx, id: item.id })));
+    });
+    
+    console.log('🔍 DEBUG DELETE - Final state:');
+    console.log('Data after all deletions:', this.data.map((item, idx) => ({ index: idx, id: item.id, data: item })));
     
     // Clear selection and refresh
     this.clearSelection();
@@ -2477,20 +2693,518 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   deleteRecord(element: any, index: number) {
+    console.log('🗑️ DEBUG DELETE RECORD - Individual delete called:');
+    console.log('Element:', element);
+    console.log('Index:', index);
+    console.log('Call stack:', new Error().stack);
+    
     // Confirm and delete record
     if (confirm('Are you sure you want to delete this record?')) {
+      console.log('🗑️ DEBUG DELETE RECORD - Confirmed, emitting delete event');
       this.dataChanged.emit({
         type: 'DELETE',
         table: this.table.name,
         data: element,
         id: element.id
       });
+    } else {
+      console.log('🗑️ DEBUG DELETE RECORD - Cancelled by user');
     }
   }
 
   private generateId(): string {
     return Math.random().toString(36).substr(2, 9);
   }
+
+  // Column color methods
+  getColumnContextMenuData(viewColumn: ColumnViewSetting): ColumnContextMenuData {
+    const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+    const referenceInfo = this.getReferenceInfo(viewColumn);
+    
+    return {
+      columnId: viewColumn.columnId,
+      columnName: viewColumn.displayName || viewColumn.columnName,
+      isReferenced: this.isRelationshipColumn(viewColumn),
+      currentColor: relationshipDisplayColumn?.color,
+      referenceInfo: referenceInfo
+    };
+  }
+
+  getReferenceInfo(viewColumn: ColumnViewSetting): { sourceTableName: string; sourceColumnName: string; relationshipType: string } | undefined {
+    if (!this.isRelationshipColumn(viewColumn)) {
+      return undefined;
+    }
+
+    const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+    if (!relationshipDisplayColumn) {
+      return undefined;
+    }
+
+    // Find the relationship
+    const relationship = this.relationships.find(r => r.id === relationshipDisplayColumn.relationshipId);
+    if (!relationship) {
+      return undefined;
+    }
+
+    // Find the source table
+    const sourceTable = this.allTables.find(t => t.id === relationshipDisplayColumn.sourceTableId);
+    if (!sourceTable) {
+      return undefined;
+    }
+
+    // Extract field index from columnId to find the specific field
+    // Format: "rel_${relDisplayColId}_${fieldIndex}"
+    const parts = viewColumn.columnId.split('_');
+    if (parts.length >= 3) {
+      const fieldIndex = parseInt(parts[2]);
+      const field = relationshipDisplayColumn.fields[fieldIndex];
+      
+      if (field) {
+        // Find the source column
+        const sourceColumn = sourceTable.columns.find(c => c.id === field.sourceColumnId);
+        if (sourceColumn) {
+          return {
+            sourceTableName: sourceTable.name,
+            sourceColumnName: sourceColumn.name,
+            relationshipType: relationship.type
+          };
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  getColumnBorderStyle(viewColumn: ColumnViewSetting, isHeader: boolean = false): string {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        if (isHeader) {
+          // Headers can have full borders
+          return `2px solid ${relationshipDisplayColumn.color.borderColor}`;
+        } else {
+          // Cells only have left and right borders
+          return `none`;
+        }
+      }
+    }
+    return 'none';
+  }
+
+  getColumnLeftBorder(viewColumn: ColumnViewSetting): string {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        // No mostrar border izquierdo si la columna de la izquierda es del mismo grupo
+        if (this.isAdjacentToSameGroup(viewColumn, 'left')) {
+          return 'none';
+        }
+        return `2px solid ${relationshipDisplayColumn.color.borderColor}`;
+      }
+    }
+    return 'none';
+  }
+
+  getColumnRightBorder(viewColumn: ColumnViewSetting): string {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        // No mostrar border derecho si la columna de la derecha es del mismo grupo
+        if (this.isAdjacentToSameGroup(viewColumn, 'right')) {
+          return 'none';
+        }
+        return `2px solid ${relationshipDisplayColumn.color.borderColor}`;
+      }
+    }
+    return 'none';
+  }
+
+  getColumnNeonGlow(viewColumn: ColumnViewSetting): string {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        const color = relationshipDisplayColumn.color.borderColor;
+        const rgbaColor = this.hexToRgba(color, 0.3);
+        const lightRgbaColor = this.hexToRgba(color, 0.1);
+        
+        const shadows: string[] = [];
+        
+        // Solo agregar glow izquierdo si no hay columna del mismo grupo a la izquierda
+        if (!this.isAdjacentToSameGroup(viewColumn, 'left')) {
+          shadows.push(`inset 20px 0 20px -10px ${rgbaColor}`);
+          shadows.push(`inset 40px 0 40px -20px ${lightRgbaColor}`);
+        }
+        
+        // Solo agregar glow derecho si no hay columna del mismo grupo a la derecha
+        if (!this.isAdjacentToSameGroup(viewColumn, 'right')) {
+          shadows.push(`inset -20px 0 20px -10px ${rgbaColor}`);
+          shadows.push(`inset -40px 0 40px -20px ${lightRgbaColor}`);
+        }
+        
+        return shadows.length > 0 ? shadows.join(', ') : 'none';
+      }
+    }
+    return 'none';
+  }
+
+  private hexToRgba(hex: string, alpha: number): string {
+    // Remove # if present
+    hex = hex.replace('#', '');
+    
+    // Parse hex color
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  getColumnGroupId(viewColumn: ColumnViewSetting): string | null {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn) {
+        return relationshipDisplayColumn.relationshipId;
+      }
+    }
+    return null;
+  }
+
+  isAdjacentToSameGroup(viewColumn: ColumnViewSetting, direction: 'left' | 'right'): boolean {
+    const currentGroupId = this.getColumnGroupId(viewColumn);
+    if (!currentGroupId) return false;
+
+    const currentView = this.activeView;
+    if (!currentView) return false;
+
+    const currentIndex = currentView.columnSettings.findIndex(col => col.columnId === viewColumn.columnId);
+    if (currentIndex === -1) return false;
+
+    const adjacentIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
+    if (adjacentIndex < 0 || adjacentIndex >= currentView.columnSettings.length) return false;
+
+    const adjacentColumn = currentView.columnSettings[adjacentIndex];
+    const adjacentGroupId = this.getColumnGroupId(adjacentColumn);
+
+    return currentGroupId === adjacentGroupId;
+  }
+
+  isLastRow(rowIndex: number): boolean {
+    const currentView = this.activeView;
+    if (!currentView) return false;
+    
+    const startIndex = this.currentPage * this.pageSize;
+    const endIndex = startIndex + this.pageSize;
+    const totalRows = this.paginatedData.length;
+    
+    return rowIndex === Math.min(endIndex - 1, totalRows - 1);
+  }
+
+  getRowBottomBorder(rowIndex: number, viewColumn: ColumnViewSetting): string {
+    if (this.isLastRow(rowIndex) && this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        return `2px solid ${relationshipDisplayColumn.color.borderColor}`;
+      }
+    }
+    return 'none';
+  }
+
+  getRowBottomNeonGlow(rowIndex: number, viewColumn: ColumnViewSetting): string {
+    if (this.isLastRow(rowIndex) && this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        const color = relationshipDisplayColumn.color.borderColor;
+        const rgbaColor = this.hexToRgba(color, 0.3);
+        const lightRgbaColor = this.hexToRgba(color, 0.1);
+        
+        return `inset 0 -20px 20px -10px ${rgbaColor}, inset 0 -40px 40px -20px ${lightRgbaColor}`;
+      }
+    }
+    return 'none';
+  }
+
+  getRelatedColumns(referenceTableName: string): ColumnViewSetting[] {
+    const currentView = this.activeView;
+    if (!currentView) return [];
+    
+    return currentView.columnSettings.filter(setting => 
+      this.isRelationshipColumn(setting) && 
+      this.getReferenceTableName(setting) === referenceTableName
+    );
+  }
+
+  getColumnBackgroundColor(viewColumn: ColumnViewSetting): string {
+    if (this.isRelationshipColumn(viewColumn)) {
+      const relationshipDisplayColumn = this.getRelationshipDisplayColumn(viewColumn);
+      if (relationshipDisplayColumn?.color) {
+        return relationshipDisplayColumn.color.backgroundColor;
+      }
+    }
+    return 'transparent';
+  }
+
+  getRelationshipDisplayColumn(viewColumn: ColumnViewSetting): RelationshipDisplayColumn | null {
+    if (!viewColumn.columnId.startsWith('rel_')) {
+      return null;
+    }
+    
+    // Extract relationship display column ID from columnId
+    // Format: "rel_${relDisplayColId}_${fieldIndex}"
+    const parts = viewColumn.columnId.split('_');
+    if (parts.length >= 3) {
+      const relDisplayColId = parts[1];
+      return this.relationshipDisplayColumns.find(rdc => rdc.id === relDisplayColId) || null;
+    }
+    
+    return null;
+  }
+
+  getReferenceTableName(viewColumn: ColumnViewSetting): string {
+    // For relationship columns, extract the relationship ID from columnId
+    if (viewColumn.columnId.startsWith('rel_')) {
+      // Format: "rel_${relCol.id}_${fieldIndex}"
+      const parts = viewColumn.columnId.split('_');
+      if (parts.length >= 3) {
+        const relId = parts[1]; // Get the relationship ID
+        // Find the relationship to get the referenced table name
+        const relationship = this.relationships.find(r => r.id === relId);
+        if (relationship) {
+          // Determine which table is being referenced
+          if (relationship.fromTableId === this.table.id) {
+            return relationship.toTableId;
+          } else {
+            return relationship.fromTableId;
+          }
+        }
+      }
+    }
+    
+    // Fallback: try to extract from column name for regular columns
+    const parts = viewColumn.columnName.split('_');
+    if (parts.length >= 2) {
+      return parts.slice(0, -1).join('_');
+    }
+    return viewColumn.columnName;
+  }
+
+  onColumnColorSelected(event: { columnId: string; color: ColumnColor | null }) {
+    const currentView = this.activeView;
+    if (!currentView) return;
+
+    // Find the target column
+    const targetColumn = currentView.columnSettings.find(s => s.columnId === event.columnId);
+    if (!targetColumn) return;
+
+    // Get the relationship display column
+    const relationshipDisplayColumn = this.getRelationshipDisplayColumn(targetColumn);
+    if (!relationshipDisplayColumn) return;
+
+    console.log('🎨 DEBUG COLOR SELECTION:');
+    console.log('Target column:', targetColumn.columnName);
+    console.log('Relationship Display Column ID:', relationshipDisplayColumn.id);
+    console.log('Color to apply:', event.color);
+
+    // Update the relationship display column with the new color
+    const updatedRelationshipDisplayColumns = this.relationshipDisplayColumns.map(rdc => {
+      if (rdc.id === relationshipDisplayColumn.id) {
+        return { ...rdc, color: event.color || undefined };
+      }
+      return rdc;
+    });
+
+    // Emit the updated relationship display columns
+    this.relationshipDisplayColumnsUpdated.emit(updatedRelationshipDisplayColumns);
+    
+    // Show notification
+    const colorName = event.color ? event.color.name : 'default';
+    this.snackBar.open(`Column color updated to ${colorName}`, 'Close', {
+      duration: 2000,
+      horizontalPosition: 'right',
+      verticalPosition: 'top'
+    });
+  }
+
+  onColumnRightClick(event: MouseEvent, viewColumn?: any) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (viewColumn && this.isRelationshipColumn(viewColumn)) {
+      // Open context menu for relationship columns
+      const contextMenuData = this.getColumnContextMenuData(viewColumn);
+      if (contextMenuData.isReferenced) {
+        // Trigger the context menu programmatically
+        // We'll need to find the context menu component and trigger it
+        console.log('Opening context menu for column:', viewColumn.columnName);
+        // For now, we'll emit the event to show the menu
+        this.showContextMenu(event, contextMenuData);
+      }
+    }
+  }
+
+  private showContextMenu(event: MouseEvent, data: any) {
+    // This will be handled by the context menu component
+    // We need to trigger the menu programmatically
+    console.log('Context menu data:', data);
+  }
+
+  /**
+   * Validates relationship cardinality rules
+   */
+  validateRelationshipCardinality(relationship: any, newValue: string, currentRow: any): { isValid: boolean; message: string } {
+    if (!newValue || newValue.trim() === '') {
+      return { isValid: true, message: '' }; // Allow null/empty values
+    }
+
+    const sourceTable = this.allTables.find(t => t.id === relationship.fromTableId);
+    const targetTable = this.allTables.find(t => t.id === relationship.toTableId);
+    
+    if (!sourceTable || !targetTable) {
+      return { isValid: false, message: 'Invalid relationship configuration' };
+    }
+
+    // Get all data for both tables
+    const sourceData = this.allTableData[sourceTable.name] || [];
+    const targetData = this.allTableData[targetTable.name] || [];
+
+    // Find the foreign key column in the current table
+    const foreignKeyColumn = this.regularColumns.find(col => col.id === relationship.toColumnId);
+    if (!foreignKeyColumn) {
+      return { isValid: false, message: 'Foreign key column not found' };
+    }
+
+    switch (relationship.type) {
+      case 'one-to-one':
+        return this.validateOneToOne(relationship, newValue, currentRow, sourceData, targetData, foreignKeyColumn);
+      
+      case 'one-to-many':
+        return this.validateOneToMany(relationship, newValue, currentRow, sourceData, targetData, foreignKeyColumn);
+      
+      case 'many-to-many':
+        return this.validateManyToMany(relationship, newValue, currentRow, sourceData, targetData, foreignKeyColumn);
+      
+      default:
+        return { isValid: true, message: '' };
+    }
+  }
+
+  /**
+   * Validates 1:1 relationship - ensures uniqueness on both sides
+   */
+  private validateOneToOne(relationship: any, newValue: string, currentRow: any, sourceData: any[], targetData: any[], foreignKeyColumn: any): { isValid: boolean; message: string } {
+    // Check if the target value exists in the source table
+    const sourceColumn = this.allTables.find(t => t.id === relationship.fromTableId)?.columns.find(c => c.id === relationship.fromColumnId);
+    if (!sourceColumn) {
+      return { isValid: false, message: 'Source column not found' };
+    }
+
+    const targetExists = sourceData.some(row => String(row[sourceColumn.name]) === String(newValue));
+    if (!targetExists) {
+      return { isValid: false, message: `Value '${newValue}' does not exist in ${relationship.fromTableId}` };
+    }
+
+    // Check if another row in the current table already uses this value
+    const currentTableData = this.allTableData[this.table.name] || [];
+    const conflictingRow = currentTableData.find(row => 
+      row !== currentRow && 
+      String(row[foreignKeyColumn.name]) === String(newValue)
+    );
+
+    if (conflictingRow) {
+      return { isValid: false, message: `This value is already used by another record. 1:1 relationships must be unique.` };
+    }
+
+    // Check if the source value is already referenced by another table (reverse uniqueness)
+    const reverseConflictingRow = currentTableData.find(row => 
+      row !== currentRow && 
+      String(row[foreignKeyColumn.name]) === String(newValue)
+    );
+
+    if (reverseConflictingRow) {
+      return { isValid: false, message: `This value is already referenced by another record. 1:1 relationships must be unique on both sides.` };
+    }
+
+    return { isValid: true, message: '' };
+  }
+
+  /**
+   * Validates 1:N relationship - allows multiple references to the same source
+   */
+  private validateOneToMany(relationship: any, newValue: string, currentRow: any, sourceData: any[], targetData: any[], foreignKeyColumn: any): { isValid: boolean; message: string } {
+    // Check if the target value exists in the source table
+    const sourceColumn = this.allTables.find(t => t.id === relationship.fromTableId)?.columns.find(c => c.id === relationship.fromColumnId);
+    if (!sourceColumn) {
+      return { isValid: false, message: 'Source column not found' };
+    }
+
+    const targetExists = sourceData.some(row => String(row[sourceColumn.name]) === String(newValue));
+    if (!targetExists) {
+      return { isValid: false, message: `Value '${newValue}' does not exist in ${relationship.fromTableId}` };
+    }
+
+    // For 1:N, we allow multiple references to the same source value
+    return { isValid: true, message: '' };
+  }
+
+  /**
+   * Validates M:N relationship - requires junction table
+   */
+  private validateManyToMany(relationship: any, newValue: string, currentRow: any, sourceData: any[], targetData: any[], foreignKeyColumn: any): { isValid: boolean; message: string } {
+    // For M:N relationships, we typically use a junction table
+    // This is a simplified validation - in a real implementation, you'd check the junction table
+    return { isValid: true, message: 'M:N relationships require junction table implementation' };
+  }
+
+  /**
+   * Gets relationship cardinality information for display
+   */
+  getRelationshipCardinalityInfo(relationship: any): string {
+    switch (relationship.type) {
+      case 'one-to-one':
+        return '1:1 - Each record can only reference one unique record from the source table, and each source record can only be referenced once.';
+      case 'one-to-many':
+        return '1:N - One source record can be referenced by multiple records in this table, but each record here can only reference one source record.';
+      case 'many-to-many':
+        return 'M:N - Multiple records can reference multiple source records. Requires a junction table for proper implementation.';
+      default:
+        return 'Unknown relationship type';
+    }
+  }
+
+  /**
+   * Gets current relationship usage statistics
+   */
+  getRelationshipUsageStats(relationship: any): { used: number; available: number; conflicts: number } {
+    const sourceTable = this.allTables.find(t => t.id === relationship.fromTableId);
+    const currentTableData = this.allTableData[this.table.name] || [];
+    const sourceData = this.allTableData[sourceTable?.name || ''] || [];
+    
+    const foreignKeyColumn = this.regularColumns.find(col => col.id === relationship.toColumnId);
+    if (!foreignKeyColumn) {
+      return { used: 0, available: 0, conflicts: 0 };
+    }
+
+    // Count used values
+    const usedValues = new Set();
+    const conflicts = new Set();
+    
+    currentTableData.forEach(row => {
+      const value = row[foreignKeyColumn.name];
+      if (value && value !== '') {
+        if (usedValues.has(value)) {
+          conflicts.add(value);
+        } else {
+          usedValues.add(value);
+        }
+      }
+    });
+
+    return {
+      used: usedValues.size,
+      available: sourceData.length,
+      conflicts: conflicts.size
+    };
+  }
+
 
   private getDefaultValue(type: string): any {
     switch (type.toLowerCase()) {
@@ -2582,12 +3296,20 @@ export class TableViewComponent implements OnInit, OnChanges, OnDestroy {
     
     // Check if this is a regular column
     if (!viewColumn.columnId.startsWith('rel_')) {
-      this.startEdit(rowIndex, columnIdentifier, row[viewColumn.columnName]);
+      // For regular columns, get the actual column value
+      const actualColumn = this.regularColumns.find(col => col.id === viewColumn.columnId);
+      if (actualColumn) {
+        this.startEdit(rowIndex, columnIdentifier, row[actualColumn.name]);
+      }
       return;
     }
     
     // Handle relationship columns - initialize editing state
     this.editingCell.set({ row: rowIndex, column: columnIdentifier });
+    
+    // Get the current value for relationship columns
+    const currentValue = this.getViewColumnValue(row, viewColumn);
+    this.editingValue.set(String(currentValue || ''));
     
     if (viewColumn.columnId.includes('_') && !viewColumn.columnId.endsWith(viewColumn.columnId.split('_')[1])) {
       // This is a relationship display column

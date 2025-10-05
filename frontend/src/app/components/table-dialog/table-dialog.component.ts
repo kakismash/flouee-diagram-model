@@ -160,9 +160,9 @@ export interface TableDialogData {
       justify-content: space-between;
       margin-bottom: 16px;
       padding: 12px 16px;
-      background: #f5f5f5;
+      background: var(--theme-background-secondary);
       border-radius: 8px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
       position: sticky;
       top: 0;
       z-index: 10;
@@ -171,7 +171,7 @@ export interface TableDialogData {
     
     .columns-header h3 {
       margin: 0;
-      color: #333;
+      color: var(--theme-text-primary);
       font-weight: 500;
     }
     
@@ -187,17 +187,17 @@ export interface TableDialogData {
     }
     
     .columns-scroll-container::-webkit-scrollbar-track {
-      background: #f1f1f1;
+      background: var(--theme-background-secondary);
       border-radius: 3px;
     }
     
     .columns-scroll-container::-webkit-scrollbar-thumb {
-      background: #c1c1c1;
+      background: var(--theme-border);
       border-radius: 3px;
     }
     
     .columns-scroll-container::-webkit-scrollbar-thumb:hover {
-      background: #a8a8a8;
+      background: var(--theme-text-secondary);
     }
     
     .columns-list {
@@ -212,9 +212,9 @@ export interface TableDialogData {
       flex-direction: column;
       gap: 12px;
       padding: 16px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
       border-radius: 8px;
-      background: #fafafa;
+      background: var(--theme-background-secondary);
     }
     
     .column-main {
@@ -254,15 +254,20 @@ export interface TableDialogData {
       align-items: center;
       margin-top: 8px;
       padding: 8px 12px;
-      background: #e3f2fd;
+      background: var(--theme-primary-container);
       border-radius: 6px;
-      border-left: 3px solid #1976d2;
+      border-left: 3px solid var(--theme-primary);
     }
     
     mat-dialog-title {
       display: flex;
       align-items: center;
       gap: 8px;
+      color: var(--theme-text-primary);
+    }
+    
+    mat-dialog-title mat-icon {
+      color: var(--theme-primary);
     }
     
     mat-dialog-content {
@@ -270,6 +275,430 @@ export interface TableDialogData {
       overflow: hidden; /* Remove global scroll */
       display: flex;
       flex-direction: column;
+    }
+
+    /* Theme-aware form field styles */
+    ::ng-deep .mat-mdc-form-field {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper {
+      background-color: var(--theme-background-secondary);
+      border: 1px solid var(--theme-border);
+      border-radius: 8px;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-focus-overlay {
+      background-color: transparent;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-input-element {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-form-field-label {
+      color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-text-field-wrapper {
+      border-color: var(--theme-primary);
+      box-shadow: 0 0 0 2px rgba(var(--theme-primary-rgb), 0.2);
+    }
+
+    /* Select dropdown styles */
+    ::ng-deep .mat-mdc-select {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-select-panel {
+      background-color: var(--theme-background-secondary);
+      border: 1px solid var(--theme-border);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    ::ng-deep .mat-mdc-option {
+      color: var(--theme-text-primary);
+    }
+
+    ::ng-deep .mat-mdc-option:hover {
+      background-color: var(--theme-hover);
+    }
+
+    ::ng-deep .mat-mdc-option.mdc-list-item--selected {
+      background-color: var(--theme-primary);
+      color: var(--theme-text-on-primary);
+    }
+
+    /* Checkbox styles */
+    ::ng-deep .mat-mdc-checkbox .mat-mdc-checkbox-frame {
+      border-color: var(--theme-border);
+    }
+
+    ::ng-deep .mat-mdc-checkbox.mat-mdc-checkbox-checked .mat-mdc-checkbox-background {
+      background-color: var(--theme-primary);
+    }
+
+    /* Button styles */
+    ::ng-deep .mat-mdc-raised-button {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-raised-button:hover {
+      background-color: var(--theme-primary-dark) !important;
+    }
+
+    ::ng-deep .mat-mdc-button {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-button:hover {
+      background-color: var(--theme-hover) !important;
+    }
+
+    /* Additional form field overrides */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper .mat-mdc-form-field-infix {
+      background-color: transparent !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper .mat-mdc-form-field-infix input {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper .mat-mdc-form-field-infix input::placeholder {
+      color: var(--theme-text-disabled) !important;
+    }
+
+    /* Select value text */
+    ::ng-deep .mat-mdc-select .mat-mdc-select-value {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-select .mat-mdc-select-placeholder {
+      color: var(--theme-text-disabled) !important;
+    }
+
+    /* Select arrow */
+    ::ng-deep .mat-mdc-select .mat-mdc-select-arrow {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    /* Checkbox label */
+    ::ng-deep .mat-mdc-checkbox .mat-mdc-checkbox-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    /* Checkbox label more specific selectors */
+    ::ng-deep .mat-mdc-checkbox .mdc-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    /* Error messages */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-error {
+      color: var(--theme-error) !important;
+    }
+
+    /* Hint text */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-hint {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    /* Required asterisk */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-required-marker {
+      color: var(--theme-error) !important;
+    }
+
+    /* Additional label overrides for better visibility */
+    ::ng-deep .mdc-floating-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mdc-floating-label.mdc-floating-label--float-above {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-floating-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    /* Add Column Button specific styling */
+    .columns-header button.mat-mdc-raised-button {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-text-on-primary) !important;
+      border: none !important;
+    }
+
+    .columns-header button.mat-mdc-raised-button:hover {
+      background-color: var(--theme-primary-dark) !important;
+    }
+
+    .columns-header button.mat-mdc-raised-button mat-icon {
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    /* Column item styling */
+    .column-item {
+      background-color: var(--theme-background-secondary) !important;
+      border: 1px solid var(--theme-border) !important;
+    }
+
+    .column-item h4 {
+      color: var(--theme-text-primary) !important;
+    }
+
+    .column-item .mat-mdc-icon-button {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    .column-item .mat-mdc-icon-button:hover {
+      background-color: var(--theme-hover) !important;
+      color: var(--theme-error) !important;
+    }
+
+    /* Primary key info section */
+    .primary-key-info {
+      background-color: var(--theme-primary-container) !important;
+      border-left: 3px solid var(--theme-primary) !important;
+    }
+
+    .primary-key-info .mat-mdc-checkbox-label {
+      color: var(--theme-text-primary) !important;
+    }
+
+    /* Additional specific overrides for better theme coverage */
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline {
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__notch {
+      border-color: var(--theme-primary) !important;
+    }
+
+    /* Checkbox specific overrides */
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled:checked ~ .mdc-checkbox__background {
+      background-color: var(--theme-primary) !important;
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled:indeterminate ~ .mdc-checkbox__background {
+      background-color: var(--theme-primary) !important;
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled ~ .mdc-checkbox__background {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__checkmark {
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    /* Select panel positioning and styling */
+    ::ng-deep .mat-mdc-select-panel {
+      background-color: var(--theme-background-secondary) !important;
+      border: 1px solid var(--theme-border) !important;
+      border-radius: 8px !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+      max-height: 256px !important;
+    }
+
+    /* Icon button styling */
+    ::ng-deep .mat-mdc-icon-button {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    ::ng-deep .mat-mdc-icon-button:hover {
+      background-color: var(--theme-hover) !important;
+      color: var(--theme-error) !important;
+    }
+
+    /* Dialog title and header styling */
+    ::ng-deep mat-dialog-title {
+      color: var(--theme-text-primary) !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      border-bottom: none !important;
+    }
+
+    ::ng-deep mat-dialog-title mat-icon {
+      color: var(--theme-primary) !important;
+    }
+
+    /* Remove default Material dialog header border */
+    ::ng-deep .mat-mdc-dialog-title {
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mdc-dialog__title {
+      border-bottom: none !important;
+    }
+
+    /* Remove any default dividers between header and content */
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title::after {
+      display: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__title::after {
+      display: none !important;
+    }
+
+    /* Dialog content styling */
+    ::ng-deep mat-dialog-content {
+      color: var(--theme-text-primary) !important;
+      border-top: none !important;
+    }
+
+    /* Remove any default Material dialog borders and dividers */
+    ::ng-deep .mat-mdc-dialog-container {
+      border: 1px solid var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    /* Ensure no unwanted borders between dialog sections */
+    ::ng-deep .mat-mdc-dialog-container > * {
+      border: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-actions {
+      border: none !important;
+    }
+
+    /* Dialog actions styling */
+    ::ng-deep mat-dialog-actions {
+      background-color: var(--theme-background-secondary) !important;
+      border-top: 1px solid var(--theme-border) !important;
+      padding: 16px 24px !important;
+    }
+
+    /* Scrollbar styling for columns container */
+    .columns-scroll-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .columns-scroll-container::-webkit-scrollbar-track {
+      background: var(--theme-background-secondary);
+    }
+
+    .columns-scroll-container::-webkit-scrollbar-thumb {
+      background: var(--theme-border);
+      border-radius: 4px;
+    }
+
+    .columns-scroll-container::-webkit-scrollbar-thumb:hover {
+      background: var(--theme-text-secondary);
+    }
+
+    /* Main dialog container styling */
+    .table-dialog {
+      background-color: var(--theme-background) !important;
+      color: var(--theme-text-primary) !important;
+    }
+
+    /* Form styling */
+    .table-form {
+      background-color: transparent !important;
+    }
+
+    /* Column item specific styling */
+    .column-item {
+      background-color: var(--theme-background-secondary) !important;
+      border: 1px solid var(--theme-border) !important;
+      border-radius: 8px !important;
+      padding: 16px !important;
+      margin-bottom: 12px !important;
+    }
+
+    .column-item-header {
+      display: flex !important;
+      justify-content: space-between !important;
+      align-items: center !important;
+      margin-bottom: 12px !important;
+    }
+
+    .column-item-header h4 {
+      color: var(--theme-text-primary) !important;
+      margin: 0 !important;
+      font-weight: 500 !important;
+    }
+
+    .column-main {
+      display: flex !important;
+      gap: 12px !important;
+      margin-bottom: 12px !important;
+    }
+
+    .column-options {
+      display: flex !important;
+      gap: 16px !important;
+      margin-bottom: 12px !important;
+      flex-wrap: wrap !important;
+    }
+
+    .pk-options {
+      background-color: var(--theme-primary-container) !important;
+      border: 1px solid var(--theme-primary) !important;
+      border-radius: 6px !important;
+      padding: 8px 12px !important;
+      margin-bottom: 12px !important;
+    }
+
+    /* Column form fields specific styling */
+    .column-name {
+      flex: 1 !important;
+    }
+
+    .column-type {
+      flex: 1 !important;
+    }
+
+    .default-value {
+      width: 100% !important;
     }
   `]
 })

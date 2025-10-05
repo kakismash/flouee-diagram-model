@@ -1,0 +1,104 @@
+/* Relationship Dropdown Theme Styles */
+
+/* Theme-aware form field styles */
+.relationship-edit-dropdown .mat-mdc-form-field,
+.inline-field,
+.relationship-field {
+  width: 100%;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-text-field-wrapper,
+.inline-field .mat-mdc-text-field-wrapper,
+.relationship-field .mat-mdc-text-field-wrapper {
+  background-color: var(--theme-background-secondary) !important;
+  border: 1px solid var(--theme-border) !important;
+  border-radius: 8px !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-form-field-focus-overlay,
+.inline-field .mat-mdc-form-field-focus-overlay,
+.relationship-field .mat-mdc-form-field-focus-overlay {
+  background-color: transparent !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-select,
+.inline-field .mat-mdc-select,
+.relationship-field .mat-mdc-select {
+  color: var(--theme-text-primary) !important;
+  background-color: transparent !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-select-value,
+.inline-field .mat-mdc-select-value,
+.relationship-field .mat-mdc-select-value {
+  color: var(--theme-text-primary) !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-select-placeholder,
+.inline-field .mat-mdc-select-placeholder,
+.relationship-field .mat-mdc-select-placeholder {
+  color: var(--theme-text-secondary) !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-select-arrow,
+.inline-field .mat-mdc-select-arrow,
+.relationship-field .mat-mdc-select-arrow {
+  color: var(--theme-text-secondary) !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-form-field-label,
+.inline-field .mat-mdc-form-field-label,
+.relationship-field .mat-mdc-form-field-label {
+  color: var(--theme-text-secondary) !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field .mat-mdc-form-field-subscript-wrapper,
+.inline-field .mat-mdc-form-field-subscript-wrapper,
+.relationship-field .mat-mdc-form-field-subscript-wrapper {
+  color: var(--theme-text-secondary) !important;
+}
+
+/* Focus states */
+.relationship-edit-dropdown .mat-mdc-form-field.mat-focused .mat-mdc-text-field-wrapper,
+.inline-field.mat-focused .mat-mdc-text-field-wrapper,
+.relationship-field.mat-focused .mat-mdc-text-field-wrapper {
+  border-color: var(--theme-primary) !important;
+  box-shadow: 0 0 0 2px rgba(var(--theme-primary-rgb), 0.2) !important;
+}
+
+.relationship-edit-dropdown .mat-mdc-form-field.mat-focused .mat-mdc-form-field-label,
+.inline-field.mat-focused .mat-mdc-form-field-label,
+.relationship-field.mat-focused .mat-mdc-form-field-label {
+  color: var(--theme-primary) !important;
+}
+
+/* Dropdown panel theme styles */
+::ng-deep .mat-mdc-select-panel {
+  background-color: var(--theme-background-secondary) !important;
+  border: 1px solid var(--theme-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+::ng-deep .mat-mdc-option {
+  color: var(--theme-text-primary) !important;
+  background-color: transparent !important;
+}
+
+::ng-deep .mat-mdc-option:hover {
+  background-color: var(--theme-hover) !important;
+}
+
+::ng-deep .mat-mdc-option.mdc-list-item--selected {
+  background-color: var(--theme-primary) !important;
+  color: var(--theme-text-on-primary) !important;
+}
+
+::ng-deep .mat-mdc-option.mdc-list-item--activated {
+  background-color: var(--theme-primary) !important;
+  color: var(--theme-text-on-primary) !important;
+}
+
+::ng-deep .mat-mdc-option .mdc-list-item__primary-text {
+  color: inherit !important;
+}
