@@ -107,51 +107,147 @@ jobs:
             echo "🔍 Token verification (first 10 chars): ${TOKEN_PREFIX}..."
             echo ""
             
-            # Try to create site - Netlify CLI should read NETLIFY_AUTH_TOKEN from env
-            echo "🚀 Executing: netlify sites:create --name flouee-diagram-model"
-            echo "📝 Using NETLIFY_AUTH_TOKEN from environment..."
+            # Get account and team information using Netlify API
+            echo "🔍 Getting Netlify account and team information..."
+            set +e
+            ACCOUNT_RESPONSE=$(netlify api getCurrentUser 2>&1)
+            ACCOUNT_EXIT=$?
+            set -e
+            
+            if [ $ACCOUNT_EXIT -eq 0 ]; then
+              echo "✅ Successfully authenticated with Netlify"
+              # Try to extract account ID
+              ACCOUNT_ID=$(echo "$ACCOUNT_RESPONSE" | grep -oE '"id":"[^"]*' | head -1 | cut -d'"' -f4 || echo "")
+              if [ -n "$ACCOUNT_ID" ]; then
+                echo "   Account ID: $ACCOUNT_ID"
+              fi
+            else
+              echo "⚠️  Could not get account info (will try to create site anyway)"
+            fi
+            
+            # Get teams list
+            echo "🔍 Getting available teams..."
+            set +e
+            TEAMS_RESPONSE=$(netlify api listTeams 2>&1)
+            TEAMS_EXIT=$?
+            set -e
+            
+            TEAM_ID=""
+            if [ $TEAMS_EXIT -eq 0 ]; then
+              # Try to extract first team ID from JSON response
+              if command -v jq &> /dev/null; then
+                TEAM_ID=$(echo "$TEAMS_RESPONSE" | jq -r '.[0].id // .[0].slug // empty' 2>/dev/null || echo "")
+              fi
+              # Fallback: try to extract from text
+              if [ -z "$TEAM_ID" ]; then
+                TEAM_ID=$(echo "$TEAMS_RESPONSE" | grep -oE '"id":"[^"]*' | head -1 | cut -d'"' -f4 || echo "")
+              fi
+              if [ -n "$TEAM_ID" ]; then
+                echo "✅ Found team ID: $TEAM_ID"
+              fi
+            fi
+            
+            # Try to create site using Netlify API directly (more reliable for CI/CD)
+            echo "🚀 Creating Netlify site via API..."
+            echo "📝 Site name: flouee-diagram-model"
+            if [ -n "$TEAM_ID" ]; then
+              echo "📝 Using team ID: $TEAM_ID"
+            fi
             echo ""
             
-            # Capture both stdout and stderr, don't fail immediately
+            # Build API request
+            API_URL="https://api.netlify.com/api/v1/sites"
+            SITE_NAME="flouee-diagram-model"
+            
+            # Create JSON payload
+            if [ -n "$TEAM_ID" ]; then
+              JSON_PAYLOAD="{\"name\":\"$SITE_NAME\",\"account_slug\":\"$TEAM_ID\"}"
+            else
+              JSON_PAYLOAD="{\"name\":\"$SITE_NAME\"}"
+            fi
+            
             set +e  # Don't exit on error immediately
-            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" 2>&1)
+            SITE_OUTPUT=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
+              -X POST "$API_URL" \
+              -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$JSON_PAYLOAD" 2>&1)
             EXIT_CODE=$?
             set -e  # Re-enable exit on error
             
-            echo ""
-            echo "📋 Netlify CLI exit code: $EXIT_CODE"
-            echo "📋 Netlify CLI full output:"
+            # Extract HTTP code
+            HTTP_CODE=$(echo "$SITE_OUTPUT" | grep "HTTP_CODE:" | cut -d: -f2 || echo "")
+            SITE_RESPONSE=$(echo "$SITE_OUTPUT" | sed '/HTTP_CODE:/d')
+            
+            echo "📋 API Response HTTP Code: $HTTP_CODE"
+            echo "📋 API Response:"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "$SITE_OUTPUT"
+            echo "$SITE_RESPONSE"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             
+            # Check if successful (HTTP 201 Created or 200 OK)
+            if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+              EXIT_CODE=0
+            else
+              EXIT_CODE=1
+            fi
+            
+            # If API method failed, try CLI as fallback
+            if [ $EXIT_CODE -ne 0 ]; then
+              echo "⚠️  API method failed, trying CLI with auto-selection..."
+              set +e
+              # Use expect or yes to handle interactive prompt
+              SITE_OUTPUT=$(printf "1\n" | timeout 30 netlify sites:create --name "flouee-diagram-model" 2>&1)
+              EXIT_CODE=$?
+              set -e
+            fi
+            
             if [ $EXIT_CODE -eq 0 ]; then
               # Extract site ID from output
-              # Netlify CLI output format: "Site created: https://xxxxx.netlify.app (xxxxx-xxxx-xxxx-xxxx-xxxxx)"
-              # Or: "Site created. Site ID: xxxxx-xxxx-xxxx-xxxx-xxxxx"
-              
-              # Try to extract from URL pattern
-              SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'https://[a-zA-Z0-9-]+\.netlify\.app' | sed 's|https://||' | sed 's|\.netlify\.app||' | head -1 || echo "")
-              
-              # Try to extract from "Site ID:" pattern
-              if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -i "site id" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
-              fi
-              
-              # Try to extract from parentheses pattern: (xxxxx-xxxx-xxxx-xxxx-xxxxx)
-              if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '\([a-f0-9-]+\)' | sed 's/[()]//g' | head -1 || echo "")
-              fi
-              
-              # Last resort: extract any UUID-like string
-              if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
-              fi
-              
-              # Try to extract site name from URL (sometimes the site name is the ID)
-              if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'netlify\.app/[^[:space:]]+' | sed 's|netlify\.app/||' | head -1 || echo "")
+              # If using API, response is JSON
+              if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+                # Parse JSON response from API
+                if command -v jq &> /dev/null; then
+                  SITE_ID=$(echo "$SITE_RESPONSE" | jq -r '.site_id // .id // .subdomain // empty' 2>/dev/null || echo "")
+                fi
+                # Fallback: extract from JSON manually
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_RESPONSE" | grep -oE '"site_id":"[^"]*' | cut -d'"' -f4 || echo "")
+                fi
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_RESPONSE" | grep -oE '"id":"[^"]*' | head -1 | cut -d'"' -f4 || echo "")
+                fi
+                # Try subdomain (site name)
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_RESPONSE" | grep -oE '"subdomain":"[^"]*' | cut -d'"' -f4 || echo "")
+                fi
+              else
+                # Parse CLI output format: "Site created: https://xxxxx.netlify.app (xxxxx-xxxx-xxxx-xxxx-xxxxx)"
+                # Or: "Site created. Site ID: xxxxx-xxxx-xxxx-xxxx-xxxxx"
+                
+                # Try to extract from URL pattern
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'https://[a-zA-Z0-9-]+\.netlify\.app' | sed 's|https://||' | sed 's|\.netlify\.app||' | head -1 || echo "")
+                
+                # Try to extract from "Site ID:" pattern
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_OUTPUT" | grep -i "site id" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
+                fi
+                
+                # Try to extract from parentheses pattern: (xxxxx-xxxx-xxxx-xxxx-xxxxx)
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '\([a-f0-9-]+\)' | sed 's/[()]//g' | head -1 || echo "")
+                fi
+                
+                # Last resort: extract any UUID-like string
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
+                fi
+                
+                # Try to extract site name from URL (sometimes the site name is the ID)
+                if [ -z "$SITE_ID" ]; then
+                  SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'netlify\.app/[^[:space:]]+' | sed 's|netlify\.app/||' | head -1 || echo "")
+                fi
               fi
               
               if [ -z "$SITE_ID" ]; then
