@@ -1,0 +1,159 @@
+name: Deploy to Netlify
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: ./frontend
+        run: npx tsc --noEmit
+        continue-on-error: false
+
+      - name: Build application
+        working-directory: ./frontend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Verify build output
+        working-directory: ./frontend
+        run: |
+          if [ ! -d "dist/frontend/browser" ]; then
+            echo "❌ Build output directory not found!"
+            exit 1
+          fi
+          if [ ! -f "dist/frontend/browser/index.html" ]; then
+            echo "❌ index.html not found in build output!"
+            exit 1
+          fi
+          echo "✅ Build output verified"
+
+      - name: Setup Netlify CLI
+        run: |
+          npm install -g netlify-cli
+          # Install jq for JSON parsing
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Check or Create Netlify Site
+        id: netlify-site
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          # Authenticate Netlify CLI
+          export NETLIFY_AUTH_TOKEN="$NETLIFY_AUTH_TOKEN"
+          
+          if [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "⚠️  NETLIFY_SITE_ID not set. Creating a new Netlify site..."
+            
+            # Create a new site with JSON output
+            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
+            EXIT_CODE=$?
+            
+            if [ $EXIT_CODE -eq 0 ]; then
+              # Try to parse JSON output
+              if command -v jq &> /dev/null; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | jq -r '.site_id // .id // empty' 2>/dev/null)
+              fi
+              
+              # Fallback: try grep if jq didn't work or SITE_ID is empty
+              if [ -z "$SITE_ID" ]; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -o '"site_id"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/.*"site_id"[[:space:]]*:[[:space:]]*"\([^"]*\).*/\1/' || echo "")
+              fi
+              
+              # Another fallback: try different patterns
+              if [ -z "$SITE_ID" ]; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\).*/\1/' | head -1 || echo "")
+              fi
+              
+              # Last resort: extract any UUID-like string
+              if [ -z "$SITE_ID" ]; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
+              fi
+              
+              if [ -z "$SITE_ID" ]; then
+                echo "❌ Failed to extract site ID from Netlify response"
+                echo "Netlify output:"
+                echo "$SITE_OUTPUT"
+                echo ""
+                echo "Please check the Netlify output above and manually create a site, then add NETLIFY_SITE_ID to GitHub Secrets"
+                exit 1
+              fi
+              
+              echo "✅ New Netlify site created successfully!"
+              echo "📋 SITE_ID=$SITE_ID" >> $GITHUB_OUTPUT
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🔑 IMPORTANT: Add this to GitHub Secrets"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "Secret Name: NETLIFY_SITE_ID"
+              echo "Secret Value: $SITE_ID"
+              echo ""
+              echo "Steps to add:"
+              echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
+              echo "2. Click 'New repository secret'"
+              echo "3. Name: NETLIFY_SITE_ID"
+              echo "4. Value: $SITE_ID"
+              echo "5. Click 'Add secret'"
+              echo ""
+              echo "After adding the secret, re-run this workflow for future deployments."
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+            else
+              echo "❌ Failed to create Netlify site"
+              echo "Exit code: $EXIT_CODE"
+              echo "Netlify output:"
+              echo "$SITE_OUTPUT"
+              echo ""
+              echo "Please check:"
+              echo "1. NETLIFY_AUTH_TOKEN is valid"
+              echo "2. You have permission to create sites in Netlify"
+              exit 1
+            fi
+          else
+            echo "✅ Using existing Netlify site: $NETLIFY_SITE_ID"
+            echo "📋 SITE_ID=$NETLIFY_SITE_ID" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to Netlify
+        uses: netlify/actions/cli@master
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ steps.netlify-site.outputs.SITE_ID || secrets.NETLIFY_SITE_ID }}
+        with:
+          args: deploy --dir=frontend/dist/frontend/browser --prod
+
+      - name: Netlify deployment summary
+        if: success()
+        env:
+          NETLIFY_SITE_ID: ${{ steps.netlify-site.outputs.SITE_ID || secrets.NETLIFY_SITE_ID }}
+        run: |
+          echo "✅ Deployment to Netlify completed successfully!"
+          if [ -n "$NETLIFY_SITE_ID" ]; then
+            echo "🌐 Your site should be live at: https://$NETLIFY_SITE_ID.netlify.app"
+          fi
+
