@@ -106,7 +106,6 @@ jobs:
             TOKEN_PREFIX=$(echo "$NETLIFY_AUTH_TOKEN" | cut -c1-10)
             echo "🔍 Token verification (first 10 chars): ${TOKEN_PREFIX}..."
             echo ""
-            
             # Get account and team information using Netlify API
             echo "🔍 Getting Netlify account and team information..."
             set +e
