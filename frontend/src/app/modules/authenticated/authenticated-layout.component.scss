@@ -41,20 +41,91 @@
 .view-mode-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--ds-spacing-md, 16px);
   margin-left: 16px;
+  flex-wrap: wrap;
 }
 
-.toolbar-chips {
+.toolbar-stats {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: var(--ds-spacing-md, 16px);
 }
 
-::ng-deep .toolbar-chips .mat-mdc-chip {
-  background: var(--theme-surface) !important;
-  color: var(--theme-text-primary) !important;
-  font-size: 12px;
-  height: 24px;
+.toolbar-stat-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-spacing-xs, 4px);
+  padding: var(--ds-spacing-xs, 4px) var(--ds-spacing-sm, 8px);
+  border-radius: var(--ds-radius-small, 4px);
+  background: rgba(255, 255, 255, 0.1);
+  transition: background-color var(--ds-transition-fast, 150ms ease);
+}
+
+.toolbar-stat-item:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.toolbar-stat-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  color: var(--theme-on-primary);
+  opacity: 0.9;
+}
+
+.toolbar-stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  line-height: 1.2;
+}
+
+.toolbar-stat-number {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--theme-on-primary);
+  line-height: 1.2;
+}
+
+.toolbar-stat-label {
+  font-size: 10px;
+  color: var(--theme-on-primary);
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.toolbar-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-spacing-xs, 4px);
+}
+
+.status-chip {
+  font-size: 11px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.2) !important;
+  color: var(--theme-on-primary) !important;
+}
+
+::ng-deep .status-chip.mat-primary {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
+::ng-deep .error-chip,
+::ng-deep .status-chip.mat-warn {
+  background: rgba(255, 87, 87, 0.3) !important;
+  color: #ffffff !important;
+}
+
+::ng-deep .warning-chip {
+  background: rgba(255, 193, 7, 0.3) !important;
+  color: #ffffff !important;
+}
+
+.download-button {
+  margin-left: var(--ds-spacing-xs, 4px);
 }
 
 .toolbar-theme-selector {
@@ -91,6 +162,16 @@
   background: var(--theme-hover);
 }
 
+/* Fix tooltip positioning in toolbar */
+.shared-toolbar {
+  position: relative;
+  overflow: visible !important;
+}
+
+.shared-toolbar * {
+  overflow: visible !important;
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
   .app-title {
@@ -99,5 +180,59 @@
   
   .user-email {
     display: none;
+  }
+
+  .view-mode-info {
+    gap: var(--ds-spacing-xs, 4px);
+    margin-left: 8px;
+  }
+
+  .toolbar-stats {
+    gap: var(--ds-spacing-xs, 4px);
+  }
+
+  .toolbar-stat-item {
+    padding: var(--ds-spacing-xs, 4px) 6px;
+    gap: 4px;
+  }
+
+  .toolbar-stat-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .toolbar-stat-number {
+    font-size: 12px;
+  }
+
+  .toolbar-stat-label {
+    font-size: 9px;
+  }
+
+  .toolbar-status {
+    gap: 2px;
+  }
+
+  .status-chip {
+    font-size: 10px;
+    height: 20px;
+    padding: 0 6px;
+  }
+}
+
+@media (max-width: 600px) {
+  .toolbar-stat-label {
+    display: none;
+  }
+
+  .toolbar-stat-content {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 2px;
+  }
+
+  .toolbar-stat-number::after {
+    content: '';
   }
 }

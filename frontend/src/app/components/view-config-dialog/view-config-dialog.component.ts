@@ -13,12 +13,15 @@ import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } 
 import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 
 import { TableView, ColumnViewSetting } from '../../models/table-view.model';
-import { Table, TableColumn } from '../../models/table.model';
+import { Table, TableColumn, Relationship } from '../../models/table.model';
 
 export interface ViewConfigDialogData {
   table: Table;
   view?: TableView;
   mode: 'create' | 'edit';
+  relationships?: Relationship[];
+  allTables?: Table[];
+  relationshipDisplayColumns?: any[];
 }
 
 @Component({
@@ -91,12 +94,92 @@ export interface ViewConfigDialogData {
                     </mat-checkbox>
                     
                     <div class="column-info">
-                      <div class="column-name">{{ setting.columnName }}</div>
+                      <div class="column-name" [class.active-column]="setting.isVisible">
+                        {{ setting.columnName }}
+                        <span *ngIf="setting.isVisible" class="active-badge">ACTIVE</span>
+                      </div>
                       <div class="column-type">{{ getColumnType(setting.columnId) }}</div>
                     </div>
                     
                     <div class="column-actions">
+                      <div class="column-status" *ngIf="setting.isVisible">
+                        <mat-icon class="status-icon">check_circle</mat-icon>
+                        <span>In View</span>
+                      </div>
                       <mat-icon class="drag-handle" cdkDragHandle>drag_indicator</mat-icon>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </mat-card-content>
+          </mat-card>
+
+          <!-- Related Tables Section -->
+          <mat-card class="related-tables-card" *ngIf="availableRelatedTables.length > 0">
+            <mat-card-header>
+              <mat-card-title>Related Tables</mat-card-title>
+              <mat-card-subtitle>Add columns from related tables</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="related-tables-list">
+                <div *ngFor="let relatedTable of availableRelatedTables" 
+                     class="related-table-item"
+                     [class.expanded]="relatedTable.isExpanded">
+                  
+                  <div class="related-table-content" (click)="toggleRelatedTable(relatedTable)">
+                    <mat-icon class="expand-icon" 
+                              [class.rotated]="relatedTable.isExpanded">
+                      chevron_right
+                    </mat-icon>
+                    
+                    <div class="related-table-info">
+                      <div class="related-table-name">{{ relatedTable.tableName }}</div>
+                      <div class="related-table-relationship">{{ relatedTable.relationshipType }}</div>
+                      <div class="related-table-description">{{ relatedTable.description }}</div>
+                    </div>
+                    
+                    <div class="related-table-actions">
+                      <mat-icon>link</mat-icon>
+                    </div>
+                  </div>
+
+                  <!-- Expanded Fields Section -->
+                  <div class="related-table-fields" *ngIf="relatedTable.isExpanded">
+                    <div class="fields-header">
+                      <span>Available Fields from {{ relatedTable.tableName }}</span>
+                      <div class="field-controls">
+                        <button mat-button (click)="selectAllFields(relatedTable)" class="select-all-btn">
+                          Select All
+                        </button>
+                        <button mat-button (click)="deselectAllFields(relatedTable)" class="deselect-all-btn">
+                          Deselect All
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div class="fields-list">
+                      <div *ngFor="let field of relatedTable.fields" 
+                           class="field-item">
+                        <mat-checkbox 
+                          [(ngModel)]="field.isSelected"
+                          [ngModelOptions]="{standalone: true}"
+                          (change)="onFieldSelectionChange(field, relatedTable)"
+                          class="field-checkbox">
+                        </mat-checkbox>
+                        
+                        <div class="field-info">
+                          <div class="field-name" [class.active-field]="field.isActive">
+                            {{ field.name }}
+                            <span *ngIf="field.isActive" class="active-badge">ACTIVE</span>
+                          </div>
+                          <div class="field-type">{{ field.type }}</div>
+                        </div>
+                        
+                        <div class="field-status" *ngIf="field.isActive">
+                          <mat-icon class="status-icon">check_circle</mat-icon>
+                          <span>In View</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -136,7 +219,8 @@ export interface ViewConfigDialogData {
     }
 
     .view-info-card,
-    .columns-config-card {
+    .columns-config-card,
+    .related-tables-card {
       margin-bottom: 16px;
       background: var(--theme-card-background);
       border: 1px solid var(--theme-card-border);
@@ -194,6 +278,14 @@ export interface ViewConfigDialogData {
       font-weight: 500;
       color: var(--theme-text-primary);
       word-break: break-word;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .column-name.active-column {
+      color: var(--theme-success);
+      font-weight: 600;
     }
 
     .column-type {
@@ -205,6 +297,18 @@ export interface ViewConfigDialogData {
 
     .column-actions {
       flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .column-status {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--theme-success);
+      font-size: 12px;
+      font-weight: 500;
     }
 
     .drag-handle {
@@ -219,6 +323,208 @@ export interface ViewConfigDialogData {
 
     .drag-handle:active {
       cursor: grabbing;
+    }
+
+    /* Related Tables Styles */
+    .related-tables-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 40vh;
+      overflow-y: auto;
+      padding: 8px;
+      background: var(--theme-background);
+      border-radius: 8px;
+    }
+
+    .related-table-item {
+      border: 1px solid var(--theme-border);
+      border-radius: 8px;
+      background: var(--theme-surface);
+      transition: all 0.2s ease;
+    }
+
+    .related-table-item:hover {
+      box-shadow: 0 2px 8px var(--theme-card-shadow);
+      border-color: var(--theme-primary);
+    }
+
+    .related-table-content {
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      gap: 12px;
+    }
+
+    .related-table-checkbox {
+      flex-shrink: 0;
+    }
+
+    .related-table-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .related-table-name {
+      font-weight: 500;
+      color: var(--theme-text-primary);
+      word-break: break-word;
+    }
+
+    .related-table-relationship {
+      font-size: 12px;
+      color: var(--theme-primary);
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .related-table-description {
+      font-size: 12px;
+      color: var(--theme-text-secondary);
+      font-style: italic;
+    }
+
+    .related-table-actions {
+      flex-shrink: 0;
+    }
+
+    .related-table-actions mat-icon {
+      color: var(--theme-primary);
+    }
+
+    .expand-icon {
+      color: var(--theme-text-secondary);
+      transition: transform 0.2s ease;
+      cursor: pointer;
+    }
+
+    .expand-icon.rotated {
+      transform: rotate(90deg);
+    }
+
+    .related-table-item.expanded {
+      border-color: var(--theme-primary);
+    }
+
+    /* Fields Section Styles */
+    .related-table-fields {
+      border-top: 1px solid var(--theme-border);
+      background: var(--theme-background);
+      padding: 16px;
+    }
+
+    .fields-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--theme-border);
+    }
+
+    .fields-header span {
+      font-weight: 500;
+      color: var(--theme-text-primary);
+    }
+
+    .field-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .select-all-btn,
+    .deselect-all-btn {
+      min-width: auto !important;
+      padding: 4px 8px !important;
+      font-size: 12px !important;
+    }
+
+    .select-all-btn {
+      color: var(--theme-primary) !important;
+    }
+
+    .deselect-all-btn {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    .fields-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .field-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--theme-surface);
+      border: 1px solid var(--theme-border);
+      border-radius: 6px;
+      gap: 12px;
+      transition: all 0.2s ease;
+    }
+
+    .field-item:hover {
+      border-color: var(--theme-primary);
+      background: var(--theme-hover);
+    }
+
+    .field-checkbox {
+      flex-shrink: 0;
+    }
+
+    .field-info {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .field-name {
+      font-weight: 500;
+      color: var(--theme-text-primary);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .field-name.active-field {
+      color: var(--theme-success);
+      font-weight: 600;
+    }
+
+    .active-badge {
+      background: var(--theme-success);
+      color: white;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 10px;
+      text-transform: uppercase;
+    }
+
+    .field-type {
+      font-size: 12px;
+      color: var(--theme-text-secondary);
+      text-transform: uppercase;
+    }
+
+    .field-status {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--theme-success);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .status-icon {
+      font-size: 16px;
+      color: var(--theme-success);
     }
 
     mat-dialog-content {
@@ -399,6 +705,8 @@ export interface ViewConfigDialogData {
 export class ViewConfigDialogComponent implements OnInit {
   viewForm: FormGroup;
   columnSettings: ColumnViewSetting[] = [];
+  availableRelatedTables: any[] = [];
+  existingRelationshipColumns: ColumnViewSetting[] = [];
 
   constructor(
     private fb: FormBuilder,
@@ -412,26 +720,223 @@ export class ViewConfigDialogComponent implements OnInit {
   }
 
   ngOnInit() {
+    console.log('🚀 ViewConfigDialogComponent ngOnInit');
+    console.log('📊 Data received:', this.data);
+    console.log('🎯 Mode:', this.data.mode);
+    console.log('📋 View:', this.data.view);
+    console.log('🏠 Table:', this.data.table);
+    
     if (this.data.mode === 'edit' && this.data.view) {
       this.viewForm.patchValue({
         name: this.data.view.name,
         description: this.data.view.description || ''
       });
-      this.columnSettings = [...this.data.view.columnSettings];
+      
+      console.log('📝 View form patched with:', this.viewForm.value);
+      
+      // Separate native columns from relationship columns
+      this.separateNativeAndRelatedColumns();
     } else {
       this.initializeDefaultColumnSettings();
     }
+    
+    // Initialize related tables
+    this.initializeRelatedTables();
   }
 
   private initializeDefaultColumnSettings() {
+    // Only include native columns from the table, not relationship columns
     this.columnSettings = this.data.table.columns
       .filter(col => !col.isSystemGenerated && !col.isForeignKey)
       .map((col, index) => ({
         columnId: col.id,
         columnName: col.name,
+        displayName: col.name,
         isVisible: true,
-        order: index
+        order: index,
+        width: 150
       }));
+  }
+
+  private separateNativeAndRelatedColumns() {
+    // Separate native columns from relationship columns
+    const nativeColumns: ColumnViewSetting[] = [];
+    const relationshipColumns: ColumnViewSetting[] = [];
+
+    console.log('🔍 Separating columns from view:', this.data.view!.columnSettings);
+    console.log('🏠 Current table name:', this.data.table.name);
+    console.log('📊 All tables available:', this.data.allTables?.map(t => ({ id: t.id, name: t.name })));
+
+    this.data.view!.columnSettings!.forEach(setting => {
+      console.log(`🔍 Analyzing column setting:`, setting);
+      
+      // Check if this is a relationship column
+      // Relationship columns have IDs like "rel_4kyl0w1ti_0" or column names that reference other tables
+      const isRelationshipColumn = setting.columnId.startsWith('rel_') || 
+                                  (setting.columnName.includes(' ') && // Contains spaces like "role name"
+                                   this.data.allTables?.some(table => 
+                                     setting.columnName.toLowerCase().includes(table.name.toLowerCase())
+                                   ));
+      
+      console.log(`🎯 Column "${setting.columnName}" (${setting.columnId}) is relationship: ${isRelationshipColumn}`);
+      console.log(`   - Starts with 'rel_': ${setting.columnId.startsWith('rel_')}`);
+      console.log(`   - Contains spaces: ${setting.columnName.includes(' ')}`);
+      console.log(`   - References other table: ${this.data.allTables?.some(table => 
+        setting.columnName.toLowerCase().includes(table.name.toLowerCase())
+      )}`);
+      
+      if (isRelationshipColumn) {
+        relationshipColumns.push(setting);
+        console.log('📌 Added to relationship columns:', setting);
+      } else {
+        // This is a native column
+        nativeColumns.push(setting);
+        console.log('🏠 Added to native columns:', setting);
+      }
+    });
+
+    console.log('📋 Final native columns:', nativeColumns);
+    console.log('🔗 Final relationship columns:', relationshipColumns);
+
+    // Set native columns as the main columnSettings
+    this.columnSettings = nativeColumns;
+    
+    // Store relationship columns for later use
+    this.existingRelationshipColumns = relationshipColumns;
+  }
+
+  private initializeRelatedTables() {
+    if (!this.data.relationships || !this.data.allTables) {
+      this.availableRelatedTables = [];
+      return;
+    }
+
+    console.log('🔍 Initializing related tables for table:', this.data.table.name);
+    console.log('📋 Current view column settings:', this.data.view?.columnSettings);
+
+    this.availableRelatedTables = this.data.relationships
+      .filter(rel => rel.fromTableId === this.data.table.id || rel.toTableId === this.data.table.id)
+      .map(rel => {
+        const isFromTable = rel.fromTableId === this.data.table.id;
+        const relatedTableId = isFromTable ? rel.toTableId : rel.fromTableId;
+        const relatedTable = this.data.allTables!.find(t => t.id === relatedTableId);
+        
+        if (!relatedTable) return null;
+
+        const relationshipType = this.getRelationshipType(rel, isFromTable);
+        const description = this.getRelationshipDescription(rel, relatedTable.name, isFromTable);
+        
+        console.log(`🔗 Processing relationship: ${rel.name} (${rel.id})`);
+        console.log(`📊 Related table: ${relatedTable.name} (${relatedTable.id})`);
+        
+        // Get available fields from the related table
+        const availableFields = relatedTable.columns
+          .filter(col => !col.isSystemGenerated)
+          .map(field => {
+            // SIMPLE: Check if this field exists in the current view's columnSettings
+            const isActive = this.data.view?.columnSettings?.some(col => {
+              // Match by column name patterns that exist in the view
+              return col.columnName === `${relatedTable.name}_${field.name}` ||
+                     col.columnName === `${rel.name} ${field.name}` ||
+                     (col.columnName.includes(' ') && col.columnName.includes(field.name));
+            }) || false;
+            
+            console.log(`🎯 Field "${field.name}" is active: ${isActive}`);
+
+            return {
+              id: field.id,
+              name: field.name,
+              type: field.type,
+              isSelected: isActive,
+              isActive: isActive
+            };
+          });
+
+        return {
+          relationshipId: rel.id,
+          tableId: relatedTable.id,
+          tableName: relatedTable.name,
+          relationshipType: relationshipType,
+          description: description,
+          isExpanded: false,
+          isFromTable: isFromTable,
+          fields: availableFields
+        };
+      })
+      .filter(item => item !== null);
+  }
+
+  private getRelationshipType(rel: Relationship, isFromTable: boolean): string {
+    if (rel.type === 'one-to-one') {
+      return '1:1';
+    } else if (rel.type === 'one-to-many') {
+      return isFromTable ? '1:N' : 'N:1';
+    } else if (rel.type === 'many-to-many') {
+      return 'N:N';
+    }
+    return rel.type;
+  }
+
+  private getRelationshipDescription(rel: Relationship, relatedTableName: string, isFromTable: boolean): string {
+    if (rel.type === 'one-to-one') {
+      return `One-to-one with ${relatedTableName}`;
+    } else if (rel.type === 'one-to-many') {
+      if (isFromTable) {
+        return `One-to-many: this table has many ${relatedTableName}`;
+      } else {
+        return `Many-to-one: this table belongs to one ${relatedTableName}`;
+      }
+    } else if (rel.type === 'many-to-many') {
+      return `Many-to-many with ${relatedTableName}`;
+    }
+    return `Related to ${relatedTableName}`;
+  }
+
+  toggleRelatedTable(relatedTable: any) {
+    relatedTable.isExpanded = !relatedTable.isExpanded;
+  }
+
+  selectAllFields(relatedTable: any) {
+    relatedTable.fields.forEach((field: any) => {
+      field.isSelected = true;
+      field.isActive = true;
+    });
+  }
+
+  deselectAllFields(relatedTable: any) {
+    relatedTable.fields.forEach((field: any) => {
+      field.isSelected = false;
+      field.isActive = false;
+    });
+  }
+
+  onFieldSelectionChange(field: any, relatedTable: any) {
+    // Update the active status based on current selection
+    field.isActive = field.isSelected;
+    
+    // If we're deselecting a field that was previously active,
+    // we need to remove it from the columnSettings
+    if (!field.isSelected && field.isActive) {
+      this.removeActiveFieldFromSettings(field, relatedTable);
+    }
+  }
+
+  private removeActiveFieldFromSettings(field: any, relatedTable: any) {
+    // Find and remove the column setting that matches this field
+    const possibleColumnIds = [
+      `rel_${relatedTable.relationshipId}_${field.id}`,
+      `rel_${relatedTable.relationshipId}_${field.name}`,
+      `${relatedTable.tableName}_${field.name}`,
+      `${relatedTable.tableName}_${field.id}`
+    ];
+
+    // Remove from columnSettings
+    this.columnSettings = this.columnSettings.filter(col => 
+      !possibleColumnIds.includes(col.columnId) &&
+      col.columnName !== `${relatedTable.tableName}_${field.name}` &&
+      col.columnName !== `${relatedTable.tableName}.${field.name}` &&
+      col.displayName !== `${relatedTable.tableName}.${field.name}`
+    );
   }
 
   getColumnType(columnId: string): string {
@@ -450,12 +955,72 @@ export class ViewConfigDialogComponent implements OnInit {
 
   onSave() {
     if (this.viewForm.valid) {
+      console.log('💾 Saving view...');
+      
+      // Start with native columns
+      const allColumnSettings = [...this.columnSettings];
+      let orderIndex = this.columnSettings.length;
+
+      // Add relationship columns that are selected
+      this.availableRelatedTables.forEach(relatedTable => {
+        const selectedFields = relatedTable.fields.filter((field: any) => field.isSelected);
+        
+        selectedFields.forEach((field: any) => {
+          // Find the relationshipDisplayColumns entry for this relationship
+          const relationshipDisplayColumn = this.data.relationshipDisplayColumns?.find(rdc => 
+            rdc.relationshipId === relatedTable.relationshipId
+          );
+          
+          if (relationshipDisplayColumn) {
+            // Create column ID using the relationshipDisplayColumns ID
+            const columnId = `rel_${relationshipDisplayColumn.id}_${field.id}`;
+            const columnName = `${relatedTable.tableName}_${field.name}`;
+            
+            // Check if this column already exists in the current view
+            const alreadyExists = this.data.view?.columnSettings?.some(existing => 
+              existing.columnName === columnName ||
+              existing.columnName === `${relatedTable.tableName} ${field.name}` ||
+              (existing.columnName.includes(' ') && existing.columnName.includes(field.name))
+            );
+            
+            if (!alreadyExists) {
+              allColumnSettings.push({
+                columnId: columnId,
+                columnName: columnName,
+                displayName: `${relatedTable.tableName}.${field.name}`,
+                isVisible: true,
+                order: orderIndex++,
+                width: 150
+              });
+              console.log('➕ Adding new relationship column:', columnName);
+            } else {
+              console.log('♻️ Column already exists:', columnName);
+            }
+          }
+        });
+      });
+      
+      console.log('📊 Final column settings:', allColumnSettings);
+
       const viewData: Partial<TableView> = {
         name: this.viewForm.value.name,
         description: this.viewForm.value.description,
-        columnSettings: this.columnSettings,
+        columnSettings: allColumnSettings,
         updatedAt: new Date()
       };
+
+      // If editing an existing view, preserve the original tableId and id
+      if (this.data.mode === 'edit' && this.data.view) {
+        viewData.tableId = this.data.view.tableId;
+        viewData.id = this.data.view.id;
+        viewData.createdAt = this.data.view.createdAt;
+        viewData.isDefault = this.data.view.isDefault;
+      } else {
+        // For new views, set the tableId from the current table
+        viewData.tableId = this.data.table.id;
+        viewData.isDefault = false;
+        viewData.createdAt = new Date();
+      }
 
       this.dialogRef.close(viewData);
     }

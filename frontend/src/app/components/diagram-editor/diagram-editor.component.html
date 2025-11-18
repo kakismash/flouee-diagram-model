@@ -42,14 +42,14 @@
             [style.transform]="canvasTransform()"
             [style.transform-origin]="'0 0'">
             
-            <!-- Relationship Lines (behind tables) -->
+            <!-- Relationship Lines (for all relationship types including many-to-many) -->
             @for (rel of relationships(); track rel.id) {
               @if (getTableById(rel.fromTableId) && getTableById(rel.toTableId)) {
                 <app-relationship-line
                   [relationship]="rel"
                   [fromTable]="getTableById(rel.fromTableId)!"
                   [toTable]="getTableById(rel.toTableId)!"
-                  [zoomLevel]="canvasGrid.getScale()"
+                  [zoomLevel]="zoomLevel()"
                   [relationshipDisplayColumn]="getRelationshipDisplayColumnForRelationship(rel.id)"
                   (relationshipTypeChanged)="onRelationshipTypeChanged($event)"
                   (relationshipDeleted)="onRelationshipDeleted($event)">
@@ -57,25 +57,29 @@
               }
             }
             
-            <!-- Table Cards -->
+            <!-- Table Cards (exclude junction tables) -->
             @for (table of tables(); track table.id) {
-              <app-table-card
-                [table]="table"
-                [x]="table.x"
-                [y]="table.y"
-                [zoomLevel]="canvasGrid.getScale()"
-                [isSelected]="selectedTable()?.id === table.id"
-                [relationshipDisplayColumns]="getRelationshipDisplayColumns(table.id)"
-                [allTables]="tables()"
-                (positionChanged)="onTablePositionChanged(table, $event)"
-                (dragPositionChanged)="onTableDragPositionChanged($event)"
-                (tableSelected)="onTableSelected($event)"
-                (tableEdited)="onTableEdited($event)"
-                (tableDeleted)="onTableDeleted($event)"
-                (linkRequested)="onLinkRequested($event)"
-                (relationshipDisplayColumnUpdated)="updateRelationshipDisplayColumnFields($event.displayColumn, $event.newFields)">
-              </app-table-card>
+              @if (!table.isJunctionTable) {
+                <app-table-card
+                  [table]="table"
+                  [x]="table.x"
+                  [y]="table.y"
+                  [zoomLevel]="zoomLevel()"
+                  [isSelected]="selectedTable()?.id === table.id"
+                  [relationshipDisplayColumns]="getRelationshipDisplayColumns(table.id)"
+                  [allTables]="tables()"
+                  (positionChanged)="onTablePositionChanged(table, $event)"
+                  (dragPositionChanged)="onTableDragPositionChanged($event)"
+                  (tableSelected)="onTableSelected($event)"
+                  (tableEdited)="onTableEdited($event)"
+                  (tableDeleted)="onTableDeleted($event)"
+                  (linkRequested)="onLinkRequested($event)"
+                  (relationshipDisplayColumnUpdated)="updateRelationshipDisplayColumnFields($event.displayColumn, $event.newFields)">
+                </app-table-card>
+              }
             }
+            
+            <!-- Many-to-many relationships are now displayed as lines above -->
           </div>
           
           <div class="canvas-overlay">

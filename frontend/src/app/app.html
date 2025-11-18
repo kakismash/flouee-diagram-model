@@ -1,3 +1,11 @@
 <div class="app-container">
+  <!-- Global Loading Overlay -->
+  <app-global-loading 
+    [isLoading]="isLoading()"
+    [loadingText]="loadingText()"
+    [loadingSubtitle]="loadingSubtitle()">
+  </app-global-loading>
+  
+  <!-- Main App Content -->
   <router-outlet />
 </div>

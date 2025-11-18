@@ -1,17 +1,31 @@
 {
   "name": "flouee-diagram-model",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "A visual database schema designer for Supabase",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "migrate": "node scripts/apply-migrations.js",
     "deploy-functions": "npx supabase functions deploy",
+    "deploy:inspect": "npx supabase functions deploy inspect-slave-schema",
     "start": "npx supabase start",
     "stop": "npx supabase stop",
     "reset": "npx supabase db reset",
-    "test-functions": "node scripts/test-functions.js",
-    "test-new-arch": "node scripts/test-new-architecture.js",
-    "setup-sql": "node scripts/sql-to-clipboard.js"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:deep": "node scripts/deep-test-schema-system.js",
+    "test:e2e": "node scripts/test-e2e-schema-changes.js",
+    "setup-sql": "node scripts/sql-to-clipboard.js",
+    "slave:reset": "node scripts/reset-and-init-slave.js",
+    "slave:reset-apply": "node scripts/reset-and-init-slave.js --apply-projects",
+    "slave:init": "node scripts/init-slave-from-zero.js",
+    "slave:clone": "node scripts/clone-slave-project.js",
+    "slave:init-fresh": "node scripts/init-fresh-system.js",
+    "apply-to-slave": "node scripts/apply-project-schema-to-slave.js",
+    "delete-project": "node scripts/delete-project-with-cleanup.js",
+    "reconcile": "node scripts/reconcile-all-projects.js",
+    "verify:rbac": "node scripts/verify-rbac-setup.js"
   },
   "keywords": [
     "supabase",
@@ -23,9 +37,13 @@
   "author": "Flouee Team",
   "license": "MIT",
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.75.0",
+    "dotenv": "^17.2.3"
   },
   "devDependencies": {
-    "typescript": "^5.3.0"
+    "supabase": "^2.48.3",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0",
+    "@vitest/coverage-v8": "^1.0.0"
   }
 }

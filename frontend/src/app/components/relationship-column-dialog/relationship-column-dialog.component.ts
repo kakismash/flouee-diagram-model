@@ -128,42 +128,59 @@ export interface RelationshipColumnDialogData {
       min-width: 500px;
       max-height: 70vh;
       overflow-y: auto;
+      background: var(--theme-background);
+      color: var(--theme-text-primary);
+    }
+
+    mat-dialog-title {
+      color: var(--theme-text-primary);
+      background: var(--theme-background);
+      border-bottom: 1px solid var(--theme-border);
+      padding: 16px 24px;
+      margin: 0;
+    }
+
+    mat-dialog-actions {
+      background: var(--theme-background);
+      border-top: 1px solid var(--theme-border);
+      padding: 16px 24px;
     }
 
     .info-section {
       margin: 16px 0;
       padding: 12px;
-      background: #f5f5f5;
+      background: var(--theme-background-secondary);
       border-radius: 4px;
+      border: 1px solid var(--theme-border);
     }
 
     .info-section h4 {
       margin: 0 0 8px 0;
-      color: #1976d2;
+      color: var(--theme-primary);
     }
 
     .info-text {
       margin: 0;
-      color: #666;
+      color: var(--theme-text-secondary);
       font-size: 14px;
     }
 
     .pk-indicator {
-      color: #1976d2;
+      color: var(--theme-primary);
       font-weight: 500;
     }
 
     .preview-section {
       margin-top: 16px;
       padding: 12px;
-      background: #e8f5e8;
+      background: var(--theme-primary-container);
       border-radius: 4px;
-      border-left: 4px solid #4caf50;
+      border-left: 4px solid var(--theme-primary);
     }
 
     .preview-section h4 {
       margin: 0 0 12px 0;
-      color: #2e7d32;
+      color: var(--theme-primary);
     }
 
     .preview-item {
@@ -174,17 +191,17 @@ export interface RelationshipColumnDialogData {
 
     .preview-label {
       font-weight: 500;
-      color: #2e7d32;
+      color: var(--theme-primary);
     }
 
     .preview-value {
-      color: #1b5e20;
+      color: var(--theme-text-primary);
       font-family: monospace;
     }
 
     mat-hint {
       font-size: 12px;
-      color: #666;
+      color: var(--theme-text-secondary);
     }
 
     .fields-section {
@@ -200,7 +217,7 @@ export interface RelationshipColumnDialogData {
 
     .fields-header h4 {
       margin: 0;
-      color: #333;
+      color: var(--theme-text-primary);
     }
 
     .fields-list {
@@ -210,10 +227,10 @@ export interface RelationshipColumnDialogData {
     }
 
     .field-item {
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
       border-radius: 8px;
       padding: 16px;
-      background: #fafafa;
+      background: var(--theme-background-secondary);
     }
 
     .field-header {
@@ -225,7 +242,7 @@ export interface RelationshipColumnDialogData {
 
     .field-header h5 {
       margin: 0;
-      color: #555;
+      color: var(--theme-text-primary);
       font-size: 14px;
     }
 
@@ -248,9 +265,9 @@ export interface RelationshipColumnDialogData {
     }
 
     .preview-container {
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
       border-radius: 4px;
-      background: white;
+      background: var(--theme-background);
       overflow: hidden;
     }
 
@@ -259,19 +276,19 @@ export interface RelationshipColumnDialogData {
       justify-content: space-between;
       align-items: center;
       padding: 8px 12px;
-      background: #f8f9fa;
-      border-bottom: 1px solid #e0e0e0;
+      background: var(--theme-background-secondary);
+      border-bottom: 1px solid var(--theme-border);
     }
 
     .preview-source {
-      color: #1976d2;
+      color: var(--theme-primary);
       font-weight: 500;
       font-size: 14px;
     }
 
     .preview-type {
-      background: #e3f2fd;
-      color: #1976d2;
+      background: var(--theme-primary-container);
+      color: var(--theme-primary);
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 3px;
@@ -287,25 +304,301 @@ export interface RelationshipColumnDialogData {
       justify-content: space-between;
       align-items: center;
       padding: 4px 8px;
-      background: #ffffff;
+      background: var(--theme-background);
       border-radius: 3px;
       margin-bottom: 2px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--theme-border);
     }
 
     .preview-field-name {
-      color: #555;
+      color: var(--theme-text-primary);
       font-size: 12px;
       font-weight: 400;
     }
 
     .preview-field-type {
-      background: #f5f5f5;
-      color: #666;
+      background: var(--theme-background-secondary);
+      color: var(--theme-text-secondary);
       font-size: 9px;
       padding: 1px 4px;
       border-radius: 2px;
       font-weight: 500;
+    }
+
+    /* Dialog container styling */
+    ::ng-deep .mat-mdc-dialog-container {
+      background: var(--theme-background) !important;
+      color: var(--theme-text-primary) !important;
+      border: 1px solid var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__surface {
+      background: var(--theme-background) !important;
+      color: var(--theme-text-primary) !important;
+    }
+
+    /* Theme-aware form field styles */
+    ::ng-deep .mat-mdc-form-field {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper {
+      background-color: var(--theme-background-secondary) !important;
+      border: 1px solid var(--theme-border) !important;
+      border-radius: 8px !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-focus-overlay {
+      background-color: transparent !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-input-element {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-form-field-label {
+      color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mat-mdc-text-field-wrapper {
+      border-color: var(--theme-primary) !important;
+      box-shadow: 0 0 0 2px rgba(var(--theme-primary-rgb), 0.2) !important;
+    }
+
+    /* Select dropdown styles */
+    ::ng-deep .mat-mdc-select {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-select-panel {
+      background-color: var(--theme-background-secondary) !important;
+      border: 1px solid var(--theme-border) !important;
+      border-radius: 8px !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+    }
+
+    ::ng-deep .mat-mdc-option {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-option:hover {
+      background-color: var(--theme-hover) !important;
+    }
+
+    ::ng-deep .mat-mdc-option.mdc-list-item--selected {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    /* Button styles */
+    ::ng-deep .mat-mdc-raised-button {
+      background-color: var(--theme-primary) !important;
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-raised-button:hover {
+      background-color: var(--theme-primary-dark) !important;
+    }
+
+    ::ng-deep .mat-mdc-button {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-button:hover {
+      background-color: var(--theme-hover) !important;
+    }
+
+    /* Checkbox styles */
+    ::ng-deep .mat-mdc-checkbox .mat-mdc-checkbox-frame {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox.mat-mdc-checkbox-checked .mat-mdc-checkbox-background {
+      background-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled:checked ~ .mdc-checkbox__background {
+      background-color: var(--theme-primary) !important;
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__native-control:enabled ~ .mdc-checkbox__background {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-checkbox__checkmark {
+      color: var(--theme-text-on-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mat-mdc-checkbox-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox .mdc-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    ::ng-deep .mat-mdc-checkbox label {
+      color: var(--theme-text-primary) !important;
+      opacity: 1 !important;
+    }
+
+    /* Error messages */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-error {
+      color: var(--theme-error) !important;
+    }
+
+    /* Hint text */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-hint {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    /* Required asterisk */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-form-field-required-marker {
+      color: var(--theme-error) !important;
+    }
+
+    /* Input placeholder */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-input-element::placeholder {
+      color: var(--theme-text-disabled) !important;
+    }
+
+    /* Additional form field overrides */
+    ::ng-deep .mat-mdc-form-field .mat-mdc-text-field-wrapper .mat-mdc-form-field-infix {
+      background-color: transparent !important;
+    }
+
+    /* Notched outline styling */
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch {
+      border-color: var(--theme-border) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline {
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: var(--theme-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__notch {
+      border-color: var(--theme-primary) !important;
+    }
+
+    /* Select value text */
+    ::ng-deep .mat-mdc-select .mat-mdc-select-value {
+      color: var(--theme-text-primary) !important;
+    }
+
+    ::ng-deep .mat-mdc-select .mat-mdc-select-placeholder {
+      color: var(--theme-text-disabled) !important;
+    }
+
+    /* Select arrow */
+    ::ng-deep .mat-mdc-select .mat-mdc-select-arrow {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    /* Additional label overrides for better visibility */
+    ::ng-deep .mdc-floating-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mdc-floating-label.mdc-floating-label--float-above {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-floating-label {
+      color: var(--theme-text-primary) !important;
+      opacity: 0.9 !important;
+    }
+
+    /* Icon button styling */
+    ::ng-deep .mat-mdc-icon-button {
+      color: var(--theme-text-secondary) !important;
+    }
+
+    ::ng-deep .mat-mdc-icon-button:hover {
+      background-color: var(--theme-hover) !important;
+      color: var(--theme-error) !important;
+    }
+
+    /* Dialog title and header styling - Remove unwanted borders */
+    ::ng-deep mat-dialog-title {
+      color: var(--theme-text-primary) !important;
+      border-bottom: none !important;
+    }
+
+    /* Remove default Material dialog header border */
+    ::ng-deep .mat-mdc-dialog-title {
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mdc-dialog__title {
+      border-bottom: none !important;
+    }
+
+    /* Remove any default dividers between header and content */
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title::after {
+      display: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__title::after {
+      display: none !important;
+    }
+
+    /* Dialog content styling */
+    ::ng-deep mat-dialog-content {
+      color: var(--theme-text-primary) !important;
+      border-top: none !important;
+    }
+
+    /* Remove any default Material dialog borders and dividers */
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mdc-dialog__content {
+      border-top: none !important;
+      border-bottom: none !important;
+    }
+
+    /* Ensure no unwanted borders between dialog sections */
+    ::ng-deep .mat-mdc-dialog-container > * {
+      border: none !important;
+    }
+
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-title,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-content,
+    ::ng-deep .mat-mdc-dialog-container .mat-mdc-dialog-actions {
+      border: none !important;
+    }
+
+    /* Dialog actions styling */
+    ::ng-deep mat-dialog-actions {
+      background-color: var(--theme-background-secondary) !important;
+      border-top: 1px solid var(--theme-border) !important;
+      padding: 16px 24px !important;
     }
   `]
 })

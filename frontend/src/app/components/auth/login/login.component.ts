@@ -584,10 +584,9 @@ export class LoginComponent implements OnInit {
         // Show loading success state
         this.isLoadingSuccess = true;
         
-        // Wait for animation to complete, then navigate
-        setTimeout(() => {
-          this.router.navigate(['/']);
-        }, 2500); // 2.5 seconds to show the animation
+        // AuthService already handles navigation to /dashboard
+        // No need to navigate here - prevents double navigation
+        console.log('✅ Login successful, AuthService handling navigation');
       } else {
         this.snackBar.open(result.error || 'Login failed', 'Close', {
           duration: 5000,

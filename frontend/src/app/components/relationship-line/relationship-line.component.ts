@@ -14,94 +14,105 @@ import { Relationship, Table, RelationshipDisplayColumn } from '../../models/tab
   template: `
     <div class="relationship-container">
       <svg class="relationship-line" [style.pointer-events]="'none'">
-        <defs>
+      <defs>
           <!-- Arrow marker for one-to-one -->
           <marker id="arrow-one-to-one" markerWidth="10" markerHeight="10" 
-                  refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+                refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
             <path d="M0,0 L0,6 L9,3 z" fill="#666" />
-          </marker>
-          
+        </marker>
+        
           <!-- Circle marker for one-to-many (one side) -->
           <marker id="circle-one" markerWidth="8" markerHeight="8" 
-                  refX="4" refY="4" orient="auto">
+                refX="4" refY="4" orient="auto">
             <circle cx="4" cy="4" r="3" fill="white" stroke="#666" stroke-width="1.5" />
-          </marker>
-          
+        </marker>
+        
           <!-- Crow's foot marker for one-to-many (many side) -->
           <marker id="crow-foot" markerWidth="12" markerHeight="12" 
-                  refX="10" refY="6" orient="auto">
+                refX="10" refY="6" orient="auto">
             <path d="M0,0 L10,6 L0,12" stroke="#666" stroke-width="1.5" fill="none" />
-          </marker>
-        </defs>
+        </marker>
         
-        <!-- The relationship line -->
-        <path 
-          [attr.d]="pathData"
-          [attr.stroke]="getLineColor()"
-          stroke-width="2"
-          fill="none"
-          [attr.marker-start]="getStartMarker()"
-          [attr.marker-end]="getEndMarker()"
-          class="relationship-path"
-        />
-      </svg>
+          <!-- Double crow's foot marker for many-to-many (both sides) -->
+          <marker id="crow-foot-many-to-many" markerWidth="12" markerHeight="12" 
+                refX="10" refY="6" orient="auto">
+            <path d="M0,0 L10,6 L0,12" stroke="#FF9800" stroke-width="2" fill="none" />
+        </marker>
+      </defs>
       
+        <!-- The relationship line -->
+      <path 
+        [attr.d]="pathData"
+        [attr.stroke]="getLineColor()"
+        stroke-width="2"
+        fill="none"
+        [attr.marker-start]="getStartMarker()"
+        [attr.marker-end]="getEndMarker()"
+          class="relationship-path"
+      />
+    </svg>
+    
       <!-- Always visible three dots button -->
-      <button mat-icon-button 
+    <button mat-icon-button 
               class="three-dots-button"
               [style.left.px]="dotsPosition.x"
               [style.top.px]="dotsPosition.y"
-              [matMenuTriggerFor]="relationshipMenu"
+            [matMenuTriggerFor]="relationshipMenu"
               (click)="onDotsClick($event)">
-        <mat-icon>more_vert</mat-icon>
-      </button>
-      
+      <mat-icon>more_vert</mat-icon>
+    </button>
+    
       <!-- Context menu for relationship -->
       <mat-menu #relationshipMenu="matMenu" class="relationship-context-menu">
         <ng-container matMenuContent>
           <!-- Relationship Type Section -->
-          <div class="menu-section">
+      <div class="menu-section">
             <div class="menu-section-title">Relationship Type</div>
             <button mat-menu-item (click)="changeRelationshipType('one-to-one')" 
-                    [class.selected]="relationship.type === 'one-to-one'">
-              <mat-icon>link</mat-icon>
+                [class.selected]="relationship.type === 'one-to-one'">
+          <mat-icon>link</mat-icon>
               <span>One to One (1:1)</span>
-            </button>
+        </button>
             <button mat-menu-item (click)="changeRelationshipType('one-to-many')" 
-                    [class.selected]="relationship.type === 'one-to-many'">
-              <mat-icon>account_tree</mat-icon>
+                [class.selected]="relationship.type === 'one-to-many'">
+          <mat-icon>account_tree</mat-icon>
               <span>One to Many (1:N)</span>
-            </button>
+        </button>
             <button mat-menu-item (click)="changeRelationshipType('many-to-many')" 
-                    [class.selected]="relationship.type === 'many-to-many'">
-              <mat-icon>share</mat-icon>
+                [class.selected]="relationship.type === 'many-to-many'">
+          <mat-icon>share</mat-icon>
               <span>Many to Many (N:M)</span>
-            </button>
-          </div>
-          
+        </button>
+      </div>
+      
           <!-- Divider -->
-          <mat-divider></mat-divider>
-          
+      <mat-divider></mat-divider>
+      
           <!-- Actions Section -->
           <div class="menu-section">
             <button mat-menu-item (click)="deleteRelationship()" class="delete-action">
-              <mat-icon>delete</mat-icon>
+        <mat-icon>delete</mat-icon>
               <span>Delete Relationship</span>
-            </button>
+      </button>
           </div>
         </ng-container>
-      </mat-menu>
+    </mat-menu>
     </div>
   `,
   styles: [`
+    :host {
+      display: contents;
+    }
+    
     .relationship-container {
-      position: absolute;
+      position: fixed;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       pointer-events: none;
       z-index: 1;
+      overflow: visible;
     }
 
     .relationship-line {
@@ -111,6 +122,7 @@ import { Relationship, Table, RelationshipDisplayColumn } from '../../models/tab
       width: 100%;
       height: 100%;
       pointer-events: none;
+      overflow: visible;
     }
 
     .relationship-path {
@@ -238,37 +250,91 @@ export class RelationshipLineComponent implements OnInit, OnChanges {
   calculatePath() {
     if (!this.fromTable || !this.toTable) return;
 
-    // Calculate connection points
-    const from = {
-      x: this.fromTable.x + this.fromTable.width / 2,
-      y: this.fromTable.y + this.fromTable.height / 2
-    };
-
-    // Calculate target point - either to relationship display column or table center
-    let to: { x: number; y: number };
-    if (this.relationshipDisplayColumn) {
-      to = this.getRelationshipDisplayColumnPosition();
-    } else {
-      to = {
-        x: this.toTable.x + this.toTable.width / 2,
-        y: this.toTable.y + this.toTable.height / 2
+    // ✅ For many-to-many relationships, use table centers (junction table is hidden)
+    // For other relationships, calculate specific column positions
+    let fromPoint: {x: number, y: number};
+    let toPoint: {x: number, y: number};
+    
+    if (this.relationship.type === 'many-to-many') {
+      // Many-to-many: connect from table centers (junction table is hidden)
+      fromPoint = {
+        x: this.fromTable.x + (this.fromTable.width || 280) / 2,
+        y: this.fromTable.y + (this.fromTable.height || 200) / 2
       };
+      toPoint = {
+        x: this.toTable.x + (this.toTable.width || 280) / 2,
+        y: this.toTable.y + (this.toTable.height || 200) / 2
+      };
+    } else {
+      // Calculate specific column positions for 1:1 and 1:M
+      fromPoint = this.getColumnPosition(this.fromTable, this.relationship.fromColumnId, 'from');
+      toPoint = this.getColumnPosition(this.toTable, this.relationship.toColumnId, 'to');
     }
 
-    // Calculate best connection points (sides of tables)
-    const fromPoint = this.getConnectionPoint(from, to, this.fromTable);
-    const toPoint = this.getConnectionPointToTarget(to, this.toTable);
+    // Validate no NaN values
+    if (isNaN(fromPoint.x) || isNaN(fromPoint.y) || isNaN(toPoint.x) || isNaN(toPoint.y)) {
+      console.error('Invalid coordinates, using table centers as fallback');
+      fromPoint.x = this.fromTable.x + (this.fromTable.width || 280) / 2;
+      fromPoint.y = this.fromTable.y + (this.fromTable.height || 200) / 2;
+      toPoint.x = this.toTable.x + (this.toTable.width || 280) / 2;
+      toPoint.y = this.toTable.y + (this.toTable.height || 200) / 2;
+    }
 
     // Create path with bezier curve for smooth connection
     const midX = (fromPoint.x + toPoint.x) / 2;
+    const control1X = fromPoint.x + (fromPoint.x < toPoint.x ? 120 : -120);
+    const control2X = toPoint.x + (toPoint.x < fromPoint.x ? 120 : -120);
     
-    this.pathData = `M ${fromPoint.x},${fromPoint.y} C ${midX},${fromPoint.y} ${midX},${toPoint.y} ${toPoint.x},${toPoint.y}`;
+    this.pathData = `M ${fromPoint.x},${fromPoint.y} C ${control1X},${fromPoint.y} ${control2X},${toPoint.y} ${toPoint.x},${toPoint.y}`;
 
     // Calculate dots position (middle of the line)
     this.dotsPosition = {
-      x: midX - 12, // Center the 24px button
+      x: midX - 12,
       y: (fromPoint.y + toPoint.y) / 2 - 12
     };
+  }
+
+  // ✅ Calculate specific column position (canvas only, no DOM)
+  private getColumnPosition(table: Table, columnId: string, direction: 'from' | 'to'): {x: number, y: number} {
+    // Find the column
+    const column = table.columns.find(c => c.id === columnId);
+    if (!column) {
+      // Fallback: table center
+      return {
+        x: table.x + (table.width || 280) / 2,
+        y: table.y + (table.height || 200) / 2
+      };
+    }
+
+    // Calculate column index
+    const columnIndex = table.columns.findIndex(c => c.id === columnId);
+    const headerHeight = 50;
+    const rowHeight = 32;
+    
+    // Calculate Y based on index
+    const columnY = table.y + headerHeight + (columnIndex * rowHeight) + (rowHeight / 2);
+    
+    // Determine X: connect from the edge closest to the other table
+    const otherTable = direction === 'from' ? this.toTable : this.fromTable;
+    const tableWidth = table.width || 280;
+    
+    const tableCenterX = table.x + tableWidth / 2;
+    const otherCenterX = otherTable.x + (otherTable.width || 280) / 2;
+    
+    let columnX: number;
+    if (direction === 'from') {
+      // FROM: connect from the side facing TO
+      columnX = otherCenterX > tableCenterX 
+        ? table.x + tableWidth  // TO is on the right → connect from right edge
+        : table.x;              // TO is on the left → connect from left edge
+        } else {
+      // TO: connect to the side facing FROM
+      columnX = otherCenterX < tableCenterX 
+        ? table.x               // FROM is on the left → connect to left edge
+        : table.x + tableWidth; // FROM is on the right → connect to right edge
+    }
+    
+    return { x: columnX, y: columnY };
   }
 
   getConnectionPoint(from: {x: number, y: number}, to: {x: number, y: number}, table: Table) {
@@ -364,6 +430,8 @@ export class RelationshipLineComponent implements OnInit, OnChanges {
         return 'url(#arrow-one-to-one)';
       case 'one-to-many':
         return 'url(#circle-one)';
+      case 'many-to-many':
+        return 'url(#crow-foot-many-to-many)'; // Crow's foot on both sides for M:M
       default:
         return null;
     }
@@ -376,7 +444,7 @@ export class RelationshipLineComponent implements OnInit, OnChanges {
       case 'one-to-many':
         return 'url(#crow-foot)';
       case 'many-to-many':
-        return 'url(#crow-foot)';
+        return 'url(#crow-foot-many-to-many)'; // Crow's foot on both sides for M:M
       default:
         return null;
     }

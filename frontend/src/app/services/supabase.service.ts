@@ -6,34 +6,106 @@ import { environment } from '../../environments/environment';
   providedIn: 'root'
 })
 export class SupabaseService {
-  private supabase: SupabaseClient;
+  private _supabase: SupabaseClient | null = null;
   private requestQueue: (() => Promise<void>)[] = [];
   private maxConcurrentRequests = 3;
+  private initializationPromise: Promise<void> | null = null;
 
   constructor() {
-    this.supabase = createClient(
-      environment.supabaseUrl,
-      environment.supabaseAnonKey,
-      {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: false,
-          flowType: 'pkce',
-          storage: window.localStorage,
-          storageKey: 'flouee-auth-session'
-        },
-        global: {
-          headers: {
-            'X-Client-Info': 'flouee-diagram-model'
-          }
+    // Don't initialize client in constructor to avoid template access issues
+    // Client will be lazily initialized on first access
+  }
+
+  private async initializeClient(): Promise<void> {
+    if (this._supabase) {
+      return; // Already initialized
+    }
+
+    if (this.initializationPromise) {
+      return this.initializationPromise; // Already initializing
+    }
+
+    this.initializationPromise = new Promise<void>((resolve, reject) => {
+      // Initialize immediately - no need for setTimeout
+      // Angular is already ready when services are constructed
+      try {
+        // Validate environment is available
+        if (!environment) {
+          throw new Error('Environment configuration is not available');
         }
+        
+        if (!environment.supabaseUrl || !environment.supabaseAnonKey) {
+          throw new Error('Supabase configuration is missing in environment');
+        }
+        
+        this._supabase = createClient(
+          environment.supabaseUrl,
+          environment.supabaseAnonKey,
+          {
+            auth: {
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: false,
+              flowType: 'pkce',
+              storage: window.localStorage,
+              storageKey: 'flouee-auth-session'
+            },
+            global: {
+              headers: {
+                'X-Client-Info': 'flouee-diagram-model'
+              }
+            }
+          }
+        );
+        resolve();
+      } catch (error) {
+        console.error('Error creating Supabase client:', error);
+        this.initializationPromise = null;
+        reject(error);
       }
-    );
+    });
+
+    return this.initializationPromise;
   }
 
   get client(): SupabaseClient {
-    return this.supabase;
+    if (!this._supabase) {
+      // Synchronous fallback - initialize synchronously if not already initialized
+      // This maintains backward compatibility
+      if (!environment) {
+        throw new Error('Environment configuration is not available');
+      }
+      
+      if (!environment.supabaseUrl || !environment.supabaseAnonKey) {
+        throw new Error('Supabase configuration is missing in environment');
+      }
+      
+      this._supabase = createClient(
+        environment.supabaseUrl,
+        environment.supabaseAnonKey,
+        {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: false,
+            flowType: 'pkce',
+            storage: window.localStorage,
+            storageKey: 'flouee-auth-session'
+          },
+          global: {
+            headers: {
+              'X-Client-Info': 'flouee-diagram-model'
+            }
+          }
+        }
+      );
+    }
+    return this._supabase;
+  }
+
+  async getClient(): Promise<SupabaseClient> {
+    await this.initializeClient();
+    return this.client;
   }
 
   // Queue management to prevent concurrent request issues
@@ -44,12 +116,9 @@ export class SupabaseService {
         
         while (attempts < retries) {
           try {
-            // Add timeout to prevent hanging requests
-            const timeoutPromise = new Promise<never>((_, timeoutReject) => {
-              setTimeout(() => timeoutReject(new Error('Request timeout')), 10000); // 10 second timeout
-            });
-            
-            const result = await Promise.race([request(), timeoutPromise]);
+            // Execute request directly - Supabase client and browser handle timeouts
+            // No need for custom timeout - requests will fail naturally on network issues
+            const result = await request();
             resolve(result as T);
             break;
           } catch (error) {
@@ -61,8 +130,9 @@ export class SupabaseService {
               break;
             }
             
-            // Wait before retry (exponential backoff)
-            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
+            // No delay needed - if error is real, immediate retry will fail quickly
+            // If error is transient, immediate retry may succeed
+            // Browser and Supabase client handle rate limiting
           }
         }
       };
@@ -98,14 +168,14 @@ export class SupabaseService {
 
   // Auth methods
   async signIn(email: string, password: string) {
-    return await this.supabase.auth.signInWithPassword({
+    return await this.client.auth.signInWithPassword({
       email,
       password
     });
   }
 
   async signUp(email: string, password: string, metadata?: any) {
-    return await this.supabase.auth.signUp({
+    return await this.client.auth.signUp({
       email,
       password,
       options: {
@@ -115,11 +185,11 @@ export class SupabaseService {
   }
 
   async signOut() {
-    return await this.supabase.auth.signOut();
+    return await this.client.auth.signOut();
   }
 
   getCurrentUser() {
-    return this.supabase.auth.getUser();
+    return this.client.auth.getUser();
   }
 
   // Clear request queue and reset connection
@@ -130,37 +200,49 @@ export class SupabaseService {
   // Reset Supabase client to clear any stuck connections
   resetClient(): void {
     this.clearQueue();
-    this.supabase = createClient(
-      environment.supabaseUrl,
-      environment.supabaseAnonKey,
-      {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: false,
-          flowType: 'pkce',
-          storage: window.localStorage,
-          storageKey: 'flouee-auth-session'
-        },
-        global: {
-          headers: {
-            'X-Client-Info': 'flouee-diagram-model'
+    this.initializationPromise = null;
+    
+    // Validate environment before resetting
+    if (!environment?.supabaseUrl || !environment?.supabaseAnonKey) {
+      console.error('Cannot reset Supabase client: environment configuration missing');
+      return;
+    }
+    
+    try {
+      this._supabase = createClient(
+        environment.supabaseUrl,
+        environment.supabaseAnonKey,
+        {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: false,
+            flowType: 'pkce',
+            storage: window.localStorage,
+            storageKey: 'flouee-auth-session'
+          },
+          global: {
+            headers: {
+              'X-Client-Info': 'flouee-diagram-model'
+            }
           }
         }
-      }
-    );
+      );
+    } catch (error) {
+      console.error('Error resetting Supabase client:', error);
+    }
   }
 
   // Database methods
   async getTenants() {
-    return await this.supabase
+    return await this.client
       .from('tenants')
       .select('*')
       .order('created_at', { ascending: false });
   }
 
   async getTenantById(id: string) {
-    return await this.supabase
+    return await this.client
       .from('tenants')
       .select('*')
       .eq('id', id)
@@ -168,7 +250,7 @@ export class SupabaseService {
   }
 
   async getDiagrams(tenantId: string) {
-    return await this.supabase
+    return await this.client
       .from('diagram_tables')
       .select(`
         *,
@@ -179,19 +261,8 @@ export class SupabaseService {
   }
 
   async saveDiagram(diagram: any) {
-    return await this.supabase
+    return await this.client
       .from('diagram_tables')
       .upsert(diagram);
-  }
-
-  async generateSchema(tenantId: string, schemaName: string, tables: any[], relationships: any[]) {
-    return await this.supabase.functions.invoke('generate-schema', {
-      body: {
-        tenant_id: tenantId,
-        schema_name: schemaName,
-        tables,
-        relationships
-      }
-    });
   }
 }

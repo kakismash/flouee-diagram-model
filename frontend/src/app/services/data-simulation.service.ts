@@ -43,7 +43,7 @@ export class DataSimulationService {
   }
 
   /**
-   * Genera datos realistas para una tabla
+   * Generates realistic data for a table
    */
   generateRealisticData(table: Table, count: number): any[] {
     const data: any[] = [];
@@ -55,7 +55,7 @@ export class DataSimulationService {
         if (col.isPrimaryKey && col.isAutoIncrement) {
           record[col.name] = i + 1;
         } else if (col.isForeignKey) {
-          // Los foreign keys se resolverán después
+          // Foreign keys will be resolved later
           record[col.name] = null;
         } else {
           record[col.name] = this.generateSmartValue(table, col, i);
@@ -69,7 +69,7 @@ export class DataSimulationService {
   }
 
   /**
-   * Resuelve las relaciones entre tablas
+   * Resolves relationships between tables
    */
   resolveRelationships(schema: ProjectSchema): void {
     schema.relationships.forEach((rel: Relationship) => {
@@ -171,7 +171,7 @@ export class DataSimulationService {
   }
 
   /**
-   * Obtiene datos relacionados para una tabla
+   * Gets related data for a table
    */
   getRelatedData(tableName: string, recordId: string, schema: ProjectSchema): { [relationName: string]: any[] } {
     const relatedData: { [relationName: string]: any[] } = {};
@@ -182,7 +182,7 @@ export class DataSimulationService {
       
       if (fromTable && toTable) {
         if (fromTable.name === tableName) {
-          // Relación hacia otra tabla
+          // Relationship to another table
           const toData = this.data[toTable.name];
           if (toData) {
             const related = toData.filter(record => 
@@ -191,7 +191,7 @@ export class DataSimulationService {
             relatedData[toTable.name] = related;
           }
         } else if (toTable.name === tableName) {
-          // Relación desde otra tabla
+          // Relationship from another table
           const fromData = this.data[fromTable.name];
           if (fromData) {
             const record = fromData.find(r => r.id === recordId);
@@ -221,7 +221,7 @@ export class DataSimulationService {
     
     if (!fromColumn || !toColumn) return;
     
-    // Para relaciones 1:1 y 1:N, asignar foreign keys
+    // For 1:1 and 1:N relationships, assign foreign keys
     if (rel.type === 'one-to-one' || rel.type === 'one-to-many') {
       toData.forEach((toRecord, index) => {
         if (toRecord[toColumn.name] === null) {
@@ -231,7 +231,7 @@ export class DataSimulationService {
       });
     }
     
-    // Para relaciones N:N, crear tabla intermedia (simulada)
+    // For N:N relationships, create intermediate table (simulated)
     if (rel.type === 'many-to-many') {
       this.createManyToManyData(fromData, toData, rel, fromTable, toTable);
     }
@@ -247,7 +247,7 @@ export class DataSimulationService {
     const junctionTableName = `${fromTable.name}_${toTable.name}`;
     const junctionData: any[] = [];
     
-    // Crear relaciones aleatorias
+    // Create random relationships
     fromData.forEach(fromRecord => {
       const numRelations = Math.floor(Math.random() * 3) + 1; // 1-3 relaciones
       const selectedToRecords = this.getRandomRecords(toData, numRelations);

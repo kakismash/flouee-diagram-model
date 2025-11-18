@@ -10,12 +10,24 @@ export class TableHelperService {
    * Ensures every table has an 'id' column (auto-generated, hidden from user)
    */
   ensureIdColumn(table: Table): Table {
-    const hasId = table.columns.some(c => c.name === 'id' && c.isPrimaryKey);
+    // Check if there's already an 'id' column (case insensitive)
+    const hasId = table.columns.some(c => 
+      c.name.toLowerCase() === 'id' && c.isPrimaryKey
+    );
     
     if (!hasId) {
+      // Check if there's any column named 'id' (even if not primary key)
+      const hasAnyId = table.columns.some(c => c.name.toLowerCase() === 'id');
+      
+      if (hasAnyId) {
+        console.warn('⚠️ Table already has an "id" column, skipping auto-generation');
+        return table;
+      }
+      
       const idColumn: TableColumn = {
         id: this.generateId(),
         name: 'id',
+        internal_name: `c_${this.generateId()}`, // ✅ Generate internal_name for system column
         type: 'UUID',
         isPrimaryKey: true,
         isNullable: false,

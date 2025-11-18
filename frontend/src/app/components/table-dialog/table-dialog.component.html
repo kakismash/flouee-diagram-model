@@ -1,0 +1,147 @@
+<div class="table-dialog">
+  <h2 mat-dialog-title>
+    <mat-icon>{{ data.mode === 'create' ? 'add' : 'edit' }}</mat-icon>
+    {{ data.mode === 'create' ? 'Create New Table' : 'Edit Table' }}
+  </h2>
+  
+  <mat-dialog-content>
+    <form [formGroup]="tableForm" class="table-form">
+      <!-- Table Name -->
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Table Name</mat-label>
+        <input matInput formControlName="name" placeholder="Enter table name">
+        <mat-error *ngIf="tableForm.get('name')?.hasError('required')">
+          Table name is required
+        </mat-error>
+      </mat-form-field>
+      
+      <!-- Columns Section -->
+      <div class="columns-section">
+        <div class="columns-header">
+          <h3>Columns</h3>
+          <button mat-raised-button color="primary" type="button" (click)="addColumn()" matTooltip="Add Column">
+            <mat-icon>add</mat-icon>
+            Add Column
+          </button>
+        </div>
+        
+        <div class="columns-scroll-container">
+          <div class="columns-list" formArrayName="columns">
+            <div *ngFor="let column of columnsArray.controls; let i = index" 
+                 [formGroupName]="i" 
+                 class="column-item">
+            
+            <div class="column-item-header">
+              <h4>
+                Column {{ i + 1 }}
+                <span *ngIf="column.get('isSystemColumn')?.value" class="system-badge">REQUIRED</span>
+              </h4>
+              <button *ngIf="!column.get('isSystemColumn')?.value" 
+                      mat-icon-button 
+                      type="button" 
+                      (click)="removeColumn(i)" 
+                      matTooltip="Remove Column">
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+            
+            <div class="column-main">
+              <mat-form-field appearance="outline" class="column-name">
+                <mat-label>Column Name</mat-label>
+                <input matInput 
+                       formControlName="name" 
+                       placeholder="e.g., id, name"
+                       [readonly]="column.get('isSystemColumn')?.value">
+                <mat-hint *ngIf="column.get('isSystemColumn')?.value">
+                  System column - name cannot be changed
+                </mat-hint>
+              </mat-form-field>
+              
+              <mat-form-field appearance="outline" class="column-type">
+                <mat-label>Type</mat-label>
+                <mat-select formControlName="type" 
+                            (selectionChange)="onTypeChange(i)"
+                            [disabled]="column.get('isSystemColumn')?.value">
+                  <!-- ID Column Types (shown first if it's the id column) -->
+                  <mat-option *ngIf="column.get('isSystemColumn')?.value" value="UUID">UUID (Auto-generated)</mat-option>
+                  <mat-option *ngIf="column.get('isSystemColumn')?.value" value="SERIAL">SERIAL (Auto-increment)</mat-option>
+                  <mat-option *ngIf="column.get('isSystemColumn')?.value" value="BIGSERIAL">BIGSERIAL (Auto-increment, Large)</mat-option>
+                  <mat-option *ngIf="column.get('isSystemColumn')?.value" value="INTEGER">INTEGER (Manual)</mat-option>
+                  <mat-option *ngIf="column.get('isSystemColumn')?.value" value="BIGINT">BIGINT (Manual, Large)</mat-option>
+                  
+                  <!-- Regular Column Types (for non-id columns) -->
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="SERIAL">SERIAL</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="VARCHAR(255)">VARCHAR(255)</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="TEXT">TEXT</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="INTEGER">INTEGER</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="BIGINT">BIGINT</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="BOOLEAN">BOOLEAN</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="TIMESTAMP">TIMESTAMP</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="DATE">DATE</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="TIME">TIME</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="DECIMAL">DECIMAL</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="FLOAT">FLOAT</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="DOUBLE">DOUBLE</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="JSON">JSON</mat-option>
+                  <mat-option *ngIf="!column.get('isSystemColumn')?.value" value="UUID">UUID</mat-option>
+                </mat-select>
+                <mat-hint *ngIf="column.get('isSystemColumn')?.value">
+                  Choose your preferred ID type
+                </mat-hint>
+              </mat-form-field>
+            </div>
+            
+            <div class="column-options">
+              <mat-checkbox formControlName="isPrimaryKey" 
+                            (change)="onPrimaryKeyChange(i)"
+                            [disabled]="column.get('isSystemColumn')?.value">
+                Primary Key
+              </mat-checkbox>
+              <mat-checkbox formControlName="isNullable"
+                            [disabled]="column.get('isSystemColumn')?.value">
+                Nullable
+              </mat-checkbox>
+              <mat-checkbox formControlName="isUnique"
+                            [disabled]="column.get('isSystemColumn')?.value">
+                Unique
+              </mat-checkbox>
+            </div>
+            
+            <!-- Primary Key specific options -->
+            <div *ngIf="isPrimaryKeyType(i)" class="pk-options">
+              <mat-checkbox *ngIf="isAutoIncrementType(i)" 
+                            formControlName="isAutoIncrement"
+                            [disabled]="column.get('isSystemColumn')?.value">Auto Increment</mat-checkbox>
+              <mat-checkbox *ngIf="isAutoGenerateType(i)" 
+                            formControlName="isAutoGenerate"
+                            [disabled]="column.get('isSystemColumn')?.value">Auto Generate</mat-checkbox>
+            </div>
+            
+            <mat-form-field appearance="outline" class="default-value">
+              <mat-label>Default Value</mat-label>
+              <input matInput 
+                     formControlName="defaultValue" 
+                     placeholder="e.g., 'John', 0, NOW()"
+                     [readonly]="column.get('isSystemColumn')?.value">
+              <mat-hint *ngIf="column.get('isSystemColumn')?.value">
+                System column - default value cannot be changed
+              </mat-hint>
+            </mat-form-field>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </mat-dialog-content>
+  
+  <mat-dialog-actions align="end">
+    <button mat-button (click)="onCancel()">Cancel</button>
+    <button mat-raised-button 
+            color="primary" 
+            (click)="onSave()" 
+            [disabled]="!canSave()">
+      {{ data.mode === 'create' ? 'Create' : 'Save' }}
+    </button>
+  </mat-dialog-actions>
+</div>
+

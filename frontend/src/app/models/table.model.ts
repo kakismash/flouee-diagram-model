@@ -2,7 +2,8 @@ import { TableView } from './table-view.model';
 
 export interface TableColumn {
   id: string;
-  name: string;
+  name: string; // Display name (what user sees)
+  internal_name?: string; // Real name in database (c_{id})
   type: string;
   isPrimaryKey: boolean;
   isNullable: boolean;
@@ -19,15 +20,25 @@ export interface TableColumn {
   referencedColumnId?: string; // Points to which column
 }
 
-export interface Table {
+export interface Phase {
   id: string;
   name: string;
+  color: string; // Hex color code
+  order: number;
+}
+
+export interface Table {
+  id: string;
+  name: string; // Display name (what user sees)
+  internal_name?: string; // Real name in database (t_{id})
   x: number;
   y: number;
   width: number;
   height: number;
   columns: TableColumn[];
+  phases?: Phase[]; // Optional phases for status tracking (like Monday.com)
   tenantId?: string;
+  isJunctionTable?: boolean; // True for junction tables (invisible in frontend)
 }
 
 export interface Relationship {
@@ -44,6 +55,10 @@ export interface Relationship {
   // Display configuration for relationship columns
   displayColumnId?: string; // Which column from the source table to display
   displayColumnName?: string; // Custom display name for the relationship column
+  // Junction table info for many-to-many relationships
+  junctionTableId?: string; // ID of the junction table (only for M:M)
+  junctionTableName?: string; // Name of the junction table (only for M:M)
+  junctionTableInternalName?: string; // Internal name of the junction table (only for M:M)
 }
 
 export interface RelationshipDisplayField {
@@ -85,4 +100,9 @@ export interface ProjectSchema {
   relationships: Relationship[];
   relationshipDisplayColumns: RelationshipDisplayColumn[];
   tableViews?: { [tableId: string]: TableView[] };
+  metadata?: {
+    name: string;
+    description?: string;
+    version: string;
+  };
 }

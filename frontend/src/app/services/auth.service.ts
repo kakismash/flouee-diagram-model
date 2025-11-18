@@ -1,14 +1,17 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal, computed, inject, Injector, effect } from '@angular/core';
 import { Router } from '@angular/router';
 import { SupabaseService } from './supabase.service';
+import { DeploymentService } from './deployment.service';
+import { ThemeService } from './theme.service';
 import { BehaviorSubject, Observable, from, of } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
+import { UserRole } from '../models/user-role.model';
 
 export interface User {
   id: string;
   email: string;
   organization_id: string;
-  role: string;
+  role: UserRole;
   theme_id?: string; // User's preferred theme
   created_at: string;
   updated_at: string;
@@ -34,7 +37,16 @@ export class AuthService {
 
   // Computed signals for reactive state
   user = computed(() => this.authState().user);
-  isAuthenticated = computed(() => this.hasBeenInitialized && this.authState().isAuthenticated);
+  isAuthenticated = computed(() => {
+    const result = this.hasBeenInitialized && this.authState().isAuthenticated;
+    console.log('🔍 isAuthenticated check:', {
+      hasBeenInitialized: this.hasBeenInitialized,
+      authStateIsAuthenticated: this.authState().isAuthenticated,
+      result: result,
+      user: this.user()?.email || 'none'
+    });
+    return result;
+  });
   isLoading = computed(() => this.authState().isLoading);
   error = computed(() => this.authState().error);
 
@@ -47,12 +59,92 @@ export class AuthService {
   private lastLoadedUserId: string | null = null;
   private hasBeenInitialized = false;
 
+  private injector = inject(Injector);
+
   constructor(
     private supabase: SupabaseService,
-    private router: Router
+    private router: Router,
+    private deploymentService: DeploymentService
   ) {
     // Initialize auth automatically to restore session on page reload
     this.initializeAuth();
+  }
+  
+  /**
+   * Get ThemeService instance (lazy to avoid circular dependency)
+   */
+  private getThemeService(): ThemeService | null {
+    try {
+      return this.injector.get(ThemeService);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Wait for theme to be ready using effect()
+   */
+  private async waitForThemeReady(themeService: ThemeService): Promise<void> {
+    // If already ready, resolve immediately
+    if (themeService.isThemeReady$()) {
+      return Promise.resolve();
+    }
+
+    // Otherwise, wait for isThemeReady$ to become true using effect()
+    return new Promise<void>((resolve) => {
+      const effectRef = effect(() => {
+        if (themeService.isThemeReady$()) {
+          resolve();
+          if (effectRef) {
+            effectRef.destroy();
+          }
+        }
+      }, { injector: this.injector });
+    });
+  }
+
+  /**
+   * Update user theme in database
+   */
+  async updateUserTheme(themeId: string): Promise<{ success: boolean; error?: string }> {
+    const user = this.user();
+    if (!user) {
+      console.warn('⚠️ Cannot update theme: no authenticated user');
+      return { success: false, error: 'No authenticated user' };
+    }
+
+    try {
+      console.log('💾 Saving theme to database:', themeId);
+      
+      const { error } = await this.supabase.executeRequest(async () => {
+        return await this.supabase.client
+          .from('users')
+          .update({ theme_id: themeId })
+          .eq('id', user.id);
+      });
+
+      if (error) {
+        console.error('❌ Failed to update user theme:', error);
+        return { success: false, error: error.message };
+      }
+
+      console.log('✅ Theme saved to database successfully');
+      
+      // Update local user state
+      const updatedUser = { ...user, theme_id: themeId };
+      this.updateAuthState({ 
+        user: updatedUser, 
+        isAuthenticated: true, 
+        isLoading: false, 
+        error: null 
+      });
+
+      return { success: true };
+
+    } catch (error) {
+      console.error('❌ Error updating user theme:', error);
+      return { success: false, error: 'An unexpected error occurred' };
+    }
   }
 
   private async initializeAuth() {
@@ -82,7 +174,30 @@ export class AuthService {
 
       if (session?.user) {
         console.log('✅ Found existing session:', session.user.email);
+        
+        // Initialize deployment service for existing session
+        try {
+          // No delay needed - deployment service handles initialization properly
+          await this.deploymentService.initialize(session.user.id);
+          console.log('✅ Deployment service initialized from existing session');
+        } catch (deployError) {
+          console.warn('⚠️ Could not initialize deployment service:', deployError);
+          // Not critical, continue anyway
+        }
+        
         await this.loadUserProfile(session.user.id);
+        
+        // Apply theme after loading profile from existing session
+        const user = this.user();
+        if (user) {
+          console.log('🎨 Applying theme for existing session:', user.theme_id || 'default');
+          const themeService = this.getThemeService();
+          if (themeService) {
+            themeService.applyUserTheme(user.theme_id);
+            // Wait for theme to be ready
+            await this.waitForThemeReady(themeService);
+          }
+        }
       } else {
         console.log('❌ No existing session found');
         this.updateAuthState({ 
@@ -110,6 +225,19 @@ export class AuthService {
             error: null 
           });
           this.router.navigate(['/login']);
+        } else if (event === 'INITIAL_SESSION' && session?.user) {
+          console.log('✅ Initial session detected - profile already loaded, just updating state');
+          // Profile is already loaded in initializeAuth(), just ensure state is correct
+          const currentUser = this.user();
+          if (currentUser && currentUser.id === session.user.id) {
+            console.log('✅ User profile matches session, ensuring authenticated state');
+            this.updateAuthState({ 
+              user: currentUser, 
+              isAuthenticated: true, 
+              isLoading: false, 
+              error: null 
+            });
+          }
         } else if (event === 'TOKEN_REFRESHED') {
           console.log('✅ Token refreshed successfully (no action needed)');
           // Session is automatically updated, profile already loaded
@@ -171,13 +299,22 @@ export class AuthService {
 
       if (data) {
         console.log('✅ User profile loaded successfully:', data);
+        console.log('🎨 User theme_id from database:', data.theme_id);
+        console.log('🎨 User theme_id type:', typeof data.theme_id);
         this.lastLoadedUserId = userId;
+        
+        // IMPORTANT: Set hasBeenInitialized to true to allow isAuthenticated computed to work
+        this.hasBeenInitialized = true;
+        
+        // Update auth state with user data
         this.updateAuthState({ 
           user: data, 
           isAuthenticated: true, 
           isLoading: false, 
           error: null 
         });
+        
+        console.log('✅ Auth state updated, waiting for theme service to react...');
         
         // Note: Theme will be applied by ThemeService when it detects user authentication
       } else {
@@ -245,14 +382,48 @@ export class AuthService {
       if (data.user) {
         console.log('Sign in successful:', data.user.email);
         
+        // Initialize deployment service (loads org context and creates data client)
+        try {
+          console.log('🔄 Initializing deployment service...');
+          
+          // No delay needed - deployment service handles initialization properly
+          await this.deploymentService.initialize(data.user.id);
+          console.log('✅ Deployment service initialized');
+        } catch (deployError: any) {
+          // Handle errors gracefully
+          console.error('⚠️ Error initializing deployment service:', deployError);
+          // Continue anyway - user might not have organization yet
+        }
+        
         // Temporarily reset guard to allow profile load
         this.lastLoadedUserId = null;
         
         await this.loadUserProfile(data.user.id);
         
-        // Navigate after profile is loaded
-        console.log('Navigating to dashboard after successful login');
-        this.router.navigate(['/dashboard']);
+        console.log('✅ User profile loaded and theme will be applied');
+        
+        // Apply theme IMMEDIATELY after profile load (before navigation)
+        const user = this.user();
+        if (user) {
+          console.log('🎨 Applying theme for user:', user.theme_id || 'default');
+          const themeService = this.getThemeService();
+          if (themeService) {
+            themeService.applyUserTheme(user.theme_id);
+            
+            // Wait for theme to be ready before navigating
+            await this.waitForThemeReady(themeService);
+            
+          } else {
+            console.warn('⚠️ ThemeService not available');
+            // No delay needed - continue immediately
+          }
+        }
+        // No delay needed - theme is already applied or not available
+        
+        // Navigate after theme is ready
+        console.log('🚀 Navigating to dashboard');
+        await this.router.navigate(['/dashboard']);
+        console.log('✅ Login complete');
         
         return { success: true };
       }
@@ -348,7 +519,7 @@ export class AuthService {
             id: userId,
             email: email,
             organization_id: orgData.id,
-            role: 'admin'
+            role: UserRole.ORG_ADMIN
           })
           .select()
           .single();
@@ -368,37 +539,6 @@ export class AuthService {
     }
   }
 
-  async updateUserTheme(themeId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-      const currentUser = this.user();
-      if (!currentUser) {
-        return { success: false, error: 'No authenticated user' };
-      }
-
-      const { error } = await this.supabase.executeRequest(async () => {
-        return await this.supabase.client
-          .from('users')
-          .update({ theme_id: themeId })
-          .eq('id', currentUser.id);
-      });
-
-      if (error) {
-        console.error('Error updating user theme:', error);
-        return { success: false, error: error.message };
-      }
-
-      // Update local user state
-      const updatedUser = { ...currentUser, theme_id: themeId };
-      this.updateAuthState({ user: updatedUser });
-
-      // Note: Theme will be applied by ThemeService when it detects the user update
-      return { success: true };
-    } catch (error) {
-      console.error('Error updating user theme:', error);
-      return { success: false, error: 'An unexpected error occurred' };
-    }
-  }
-
   async signOut(): Promise<void> {
     try {
       console.log('Signing out...');
@@ -408,8 +548,40 @@ export class AuthService {
       this.isLoadingProfile = false;
       this.hasBeenInitialized = false;
       
+      // Clear deployment service state
+      this.deploymentService.clear();
+      console.log('✅ Deployment service cleared');
+      
+      // Sign out from Supabase (this clears Supabase session storage)
       await this.supabase.client.auth.signOut();
-      this.router.navigate(['/login']);
+      
+      // Clear all localStorage data (theme, cached data, etc.)
+      console.log('🧹 Clearing localStorage...');
+      localStorage.removeItem('user-theme');
+      localStorage.removeItem('flouee-auth-session'); // If any
+      // Clear any other app-specific storage
+      const keysToRemove = Object.keys(localStorage).filter(key => 
+        key.startsWith('sb-') || 
+        key.startsWith('flouee-') || 
+        key.includes('supabase')
+      );
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+      console.log('✅ localStorage cleared');
+      
+      // Update auth state immediately to trigger theme reset
+      this.updateAuthState({ 
+        user: null, 
+        isAuthenticated: false, 
+        isLoading: false, 
+        error: null 
+      });
+      console.log('✅ Auth state cleared');
+      
+      // No delay needed - theme service reset is synchronous
+      
+      // Navigate to login
+      await this.router.navigate(['/login']);
+      console.log('✅ Navigated to login');
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -459,12 +631,55 @@ export class AuthService {
     return this.user()?.organization_id || null;
   }
 
-  hasRole(role: string): boolean {
+  hasRole(role: UserRole): boolean {
     return this.user()?.role === role;
   }
 
   isAdmin(): boolean {
-    return this.hasRole('admin');
+    return this.hasRole(UserRole.ADMIN);
+  }
+
+  isOrgAdmin(): boolean {
+    return this.hasRole(UserRole.ORG_ADMIN);
+  }
+
+  isClient(): boolean {
+    return this.hasRole(UserRole.CLIENT);
+  }
+
+  isOrgAdminOrHigher(): boolean {
+    const userRole = this.user()?.role;
+    if (!userRole) return false;
+    
+    return userRole === UserRole.ADMIN || userRole === UserRole.ORG_ADMIN;
+  }
+
+  /**
+   * Get current organization from deployment service
+   */
+  getCurrentOrganization() {
+    return this.deploymentService.getCurrentOrganization();
+  }
+
+  /**
+   * Get current subscription tier
+   */
+  getCurrentTier() {
+    return this.deploymentService.currentTier();
+  }
+
+  /**
+   * Check if can create resource based on tier limits
+   */
+  canCreateResource(resourceType: 'user' | 'project' | 'table' | 'relationship'): boolean {
+    return this.deploymentService.canCreateResource(resourceType);
+  }
+
+  /**
+   * Get usage percentage for a resource
+   */
+  getUsagePercentage(resourceType: 'user' | 'project'): number {
+    return this.deploymentService.getUsagePercentage(resourceType);
   }
 }
 

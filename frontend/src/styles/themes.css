@@ -14,6 +14,19 @@
   --theme-card-background: #ffffff; --theme-card-border: #e0e0e0; --theme-card-shadow: rgba(0, 0, 0, 0.1);
   --theme-button-background: #1976d2; --theme-button-hover: #1565c0; --theme-button-active: #0d47a1; --theme-button-text: #ffffff;
   --theme-input-background: #ffffff; --theme-input-border: #bdbdbd; --theme-input-border-focused: #1976d2; --theme-input-text: rgba(0, 0, 0, 0.87); --theme-input-placeholder: rgba(0, 0, 0, 0.6);
+  
+  /* Design System Tokens */
+  --ds-radius-none: 0;
+  --ds-radius-small: 4px;
+  --ds-radius-medium: 8px;
+  --ds-radius-large: 12px;
+  --ds-radius-full: 9999px;
+  --ds-spacing-xs: 4px;
+  --ds-spacing-sm: 8px;
+  --ds-spacing-md: 16px;
+  --ds-spacing-lg: 24px;
+  --ds-spacing-xl: 32px;
+  --ds-spacing-xxl: 48px;
 }
 
 /* Dark Theme */
@@ -126,6 +139,89 @@ body { background-color: var(--theme-background); color: var(--theme-text-primar
 .mat-mdc-input-element::placeholder { color: var(--theme-input-placeholder) !important; }
 .mat-mdc-form-field-outline { color: var(--theme-input-border) !important; }
 .mat-mdc-form-field.mat-focused .mat-mdc-form-field-outline { color: var(--theme-input-border-focused) !important; }
+
+/* Form field label visibility fixes for all themes */
+.mat-mdc-form-field .mat-mdc-form-field-label,
+.mat-mdc-form-field .mdc-floating-label,
+.mat-mdc-form-field .mdc-floating-label--float-above,
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper,
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label {
+  color: var(--theme-text-primary) !important;
+  opacity: 0.9 !important;
+}
+
+.mat-mdc-form-field.mat-focused .mat-mdc-form-field-label,
+.mat-mdc-form-field.mat-focused .mdc-floating-label,
+.mat-mdc-form-field.mat-focused .mdc-floating-label--float-above {
+  color: var(--theme-primary) !important;
+  opacity: 1 !important;
+}
+
+/* Additional label overrides for better visibility */
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label,
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label.mat-mdc-form-field-label--float-above {
+  color: var(--theme-text-primary) !important;
+  opacity: 0.9 !important;
+}
+
+/* Required asterisk visibility */
+.mat-mdc-form-field .mat-mdc-form-field-required-marker {
+  color: var(--theme-error) !important;
+  opacity: 1 !important;
+}
+
+/* Hint text visibility */
+.mat-mdc-form-field .mat-mdc-form-field-hint {
+  color: var(--theme-text-secondary) !important;
+  opacity: 1 !important;
+}
+
+/* Error text visibility */
+.mat-mdc-form-field .mat-mdc-form-field-error {
+  color: var(--theme-error) !important;
+  opacity: 1 !important;
+}
+
+/* Notched outline label visibility */
+.mat-mdc-form-field .mdc-notched-outline .mdc-floating-label,
+.mat-mdc-form-field .mdc-notched-outline .mdc-floating-label--float-above {
+  color: var(--theme-text-primary) !important;
+  opacity: 0.9 !important;
+}
+
+.mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-floating-label,
+.mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-floating-label--float-above {
+  color: var(--theme-primary) !important;
+  opacity: 1 !important;
+}
+
+/* Additional Material Design label selectors */
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label,
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label.mat-mdc-form-field-label--float-above,
+.mat-mdc-form-field .mat-mdc-form-field-label-wrapper .mat-mdc-form-field-label.mat-mdc-form-field-label--float-above.mat-mdc-form-field-label--required {
+  color: var(--theme-text-primary) !important;
+  opacity: 0.9 !important;
+}
+
+/* Ensure labels are visible in all states */
+.mat-mdc-form-field:not(.mat-focused) .mat-mdc-form-field-label,
+.mat-mdc-form-field:not(.mat-focused) .mdc-floating-label {
+  color: var(--theme-text-primary) !important;
+  opacity: 0.9 !important;
+}
+
+/* Focused state labels */
+.mat-mdc-form-field.mat-focused .mat-mdc-form-field-label,
+.mat-mdc-form-field.mat-focused .mdc-floating-label {
+  color: var(--theme-primary) !important;
+  opacity: 1 !important;
+}
+
+/* CDK Overlay Pane - Simple fix for dropdown visibility */
+.cdk-overlay-pane {
+  background-color: var(--theme-background-paper) !important;
+}
+
 .mat-mdc-table { background-color: var(--theme-table-row) !important; }
 .mat-mdc-header-row { background-color: var(--theme-table-header) !important; }
 .mat-mdc-row:hover { background-color: var(--theme-table-row-hover) !important; }

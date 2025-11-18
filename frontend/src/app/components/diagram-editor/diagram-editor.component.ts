@@ -1,4 +1,5 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, signal, OnInit, OnDestroy, ViewChildren, QueryList } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewInit, signal, OnInit, OnDestroy } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatToolbarModule } from '@angular/material/toolbar';
@@ -18,11 +19,22 @@ import { TableDialogComponent, TableDialogData } from '../table-dialog/table-dia
 import { RelationshipDialogComponent, RelationshipDialogData } from '../relationship-dialog/relationship-dialog.component';
 import { SimpleRelationshipDialogComponent, SimpleRelationshipDialogData } from '../simple-relationship-dialog/simple-relationship-dialog.component';
 import { RelationshipLineComponent } from '../relationship-line/relationship-line.component';
+import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component';
 import { MatDialog } from '@angular/material/dialog';
 import { ProjectService, ProjectSchema } from '../../services/project.service';
 import { NotificationComponent } from '../notification/notification.component';
 import { NotificationService } from '../../services/notification.service';
+import { PlanLimitsService } from '../../services/plan-limits.service';
 import { AuthService } from '../../services/auth.service';
+import { EventDrivenSchemaService, EventDrivenResult } from '../../services/event-driven-schema.service';
+import { SchemaChange } from '../../models/schema-change.model';
+import { RealtimeCollaborationService } from '../../services/realtime-collaboration.service';
+import { CanvasInteractionService } from '../../services/canvas-interaction.service';
+import { TablePositionService } from '../../services/table-position.service';
+import { SchemaChangeHandlerService } from '../../services/schema-change-handler.service';
+import { RelationshipConversionService } from '../../services/relationship-conversion.service';
+import { JunctionTableFilterService } from '../../services/junction-table-filter.service';
+import { RelationshipDisplayService } from '../../services/relationship-display.service';
 
 @Component({
   selector: 'app-diagram-editor',
@@ -47,7 +59,6 @@ import { AuthService } from '../../services/auth.service';
 })
 export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy {
   @ViewChild('canvasContainer', { static: true}) canvasRef!: ElementRef<HTMLDivElement>;
-  @ViewChildren(RelationshipLineComponent) relationshipLines!: QueryList<RelationshipLineComponent>;
 
   // Signals for reactive state
   tables = signal<Table[]>([]);
@@ -56,43 +67,79 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
   selectedTable = signal<Table | null>(null);
   isDrawing = signal(false);
   canvasTransform = signal('translate(0px, 0px) scale(1)');
+  zoomLevel = signal(1);
   
   private projectId: string | null = null;
-  private isDragging = false;
-  private dragStart = { x: 0, y: 0 };
-  private lastTouchDistance = 0;
-  private lastTouchCenter = { x: 0, y: 0 };
+  private routeSubscription?: Subscription;
+  
+  // ✅ Track if we're currently applying schema changes
+  private isApplyingSchemaChanges = false;
 
   constructor(
     public canvasGrid: CanvasGridService,
     private dialog: MatDialog,
     private projectService: ProjectService,
+    private planLimitsService: PlanLimitsService,
     private notificationService: NotificationService,
     private authService: AuthService,
+    private eventDrivenSchema: EventDrivenSchemaService,
+    private realtime: RealtimeCollaborationService,
     private route: ActivatedRoute,
-    private router: Router
+    private router: Router,
+    private canvasInteraction: CanvasInteractionService,
+    private tablePosition: TablePositionService,
+    private schemaHandler: SchemaChangeHandlerService,
+    private relationshipConversion: RelationshipConversionService,
+    private junctionFilter: JunctionTableFilterService,
+    private relationshipDisplay: RelationshipDisplayService
   ) {}
   
   async ngOnInit() {
-    // Get project ID from route
-    this.projectId = this.route.snapshot.paramMap.get('projectId');
-    
-    if (!this.projectId) {
-      console.error('No project ID provided');
-      this.router.navigate(['/dashboard']);
-      return;
-    }
-    
-    // Load the project
-    await this.loadProject(this.projectId);
+    // Listen for route parameter changes
+    this.routeSubscription = this.route.params.subscribe(async (params) => {
+      this.projectId = params['projectId'];
+      
+      if (!this.projectId) {
+        console.error('No project ID provided');
+        this.router.navigate(['/dashboard']);
+        return;
+      }
+      
+      // Load the project
+      await this.loadProject(this.projectId);
+      
+      // Join realtime collaboration
+      if (this.projectId) {
+        try {
+          await this.realtime.joinProject(this.projectId);
+          console.log('✅ Joined realtime collaboration');
+        } catch (error) {
+          console.warn('⚠️ Failed to join realtime collaboration:', error);
+        }
+      }
+    });
     
     // Listen for editor actions from the shared toolbar
     window.addEventListener('editor-action', this.handleEditorAction.bind(this) as EventListener);
+    
+    // Listen for realtime project updates
+    window.addEventListener('project-updated', this.handleRealtimeUpdate.bind(this) as EventListener);
   }
 
   ngOnDestroy() {
-    // Remove event listener
+    // Clean up route subscription
+    if (this.routeSubscription) {
+      this.routeSubscription.unsubscribe();
+    }
+    
+    // Remove event listeners
     window.removeEventListener('editor-action', this.handleEditorAction.bind(this) as EventListener);
+    window.removeEventListener('project-updated', this.handleRealtimeUpdate.bind(this) as EventListener);
+    
+    // Leave realtime collaboration
+    if (this.projectId) {
+      this.realtime.leaveProject();
+    }
   }
 
   private handleEditorAction(event: Event) {
@@ -117,6 +164,17 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     }
   }
 
+  private handleRealtimeUpdate(event: Event) {
+    const customEvent = event as CustomEvent;
+    const { project, updatedBy } = customEvent.detail;
+    
+    // Only reload if updated by another user
+    if (updatedBy !== this.authService.user()?.id) {
+      console.log('🔄 Project updated by another user, reloading...');
+      this.loadProject(this.projectId!);
+    }
+  }
+
   ngAfterViewInit() {
     this.initializeCanvas();
     this.setupEventListeners();
@@ -137,6 +195,7 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
 
   private updateCanvasTransform() {
     this.canvasTransform.set(this.canvasGrid.getCSSTransform());
+    this.zoomLevel.set(this.canvasGrid.getScale());
   }
 
 
@@ -145,200 +204,53 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     // This method is kept for compatibility but can be removed
   }
 
-  // Canvas event handlers
+  // Canvas event handlers - now using CanvasInteractionService
   onCanvasMouseDown(event: MouseEvent) {
-    if (event.button === 0) { // Left click
-      this.isDragging = true;
-      this.dragStart = { x: event.clientX, y: event.clientY };
-      this.canvasRef.nativeElement.style.cursor = 'grabbing';
-      event.preventDefault();
-      
+    if (this.canvasInteraction.onMouseDown(event, this.canvasRef.nativeElement)) {
       // Close any open relationship context menus when clicking on canvas
       this.closeAllRelationshipContextMenus();
     }
   }
 
   onCanvasMouseMove(event: MouseEvent) {
-    if (this.isDragging) {
-      const deltaX = event.clientX - this.dragStart.x;
-      const deltaY = event.clientY - this.dragStart.y;
-      
+    this.canvasInteraction.onMouseMove(event, (deltaX, deltaY) => {
       this.canvasGrid.pan(deltaX, deltaY);
       this.updateCanvasTransform();
-      
-      this.dragStart = { x: event.clientX, y: event.clientY };
-      event.preventDefault();
-    }
+    });
   }
 
   onCanvasMouseUp(event: MouseEvent) {
-    if (this.isDragging) {
-      this.isDragging = false;
-      this.canvasRef.nativeElement.style.cursor = 'grab';
-    }
+    this.canvasInteraction.onMouseUp(this.canvasRef.nativeElement);
   }
 
   onCanvasWheel(event: WheelEvent) {
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? 0.9 : 1.1;
-    this.canvasGrid.zoom(delta, event.offsetX, event.offsetY);
-    this.updateCanvasTransform();
+    this.canvasInteraction.onWheel(event, (zoomAmount, centerX, centerY) => {
+      this.canvasGrid.zoom(zoomAmount, centerX, centerY);
+      this.updateCanvasTransform();
+    });
   }
 
   onCanvasTouchStart(event: TouchEvent) {
-    if (event.touches.length >= 2) {
-      const touch0 = event.touches[0];
-      const touch1 = event.touches[1];
-      
-      this.lastTouchDistance = this.getDistance(touch0, touch1);
-      this.lastTouchCenter = this.getCenter(touch0, touch1);
-    }
+    this.canvasInteraction.onTouchStart(event);
   }
 
   onCanvasTouchMove(event: TouchEvent) {
-    event.preventDefault();
-    
-    if (event.touches.length >= 2) {
-      const touch0 = event.touches[0];
-      const touch1 = event.touches[1];
-      
-      const currentDistance = this.getDistance(touch0, touch1);
-      const currentCenter = this.getCenter(touch0, touch1);
-      
-      if (this.lastTouchDistance > 0) {
-        const zoomAmount = currentDistance / this.lastTouchDistance;
-        this.canvasGrid.zoom(zoomAmount, currentCenter.x, currentCenter.y);
+    this.canvasInteraction.onTouchMove(
+      event,
+      (zoomAmount, centerX, centerY) => {
+        this.canvasGrid.zoom(zoomAmount, centerX, centerY);
+      },
+      (deltaX, deltaY) => {
+        this.canvasGrid.pan(deltaX, deltaY);
       }
-      
-      const deltaX = currentCenter.x - this.lastTouchCenter.x;
-      const deltaY = currentCenter.y - this.lastTouchCenter.y;
-      this.canvasGrid.pan(deltaX, deltaY);
-      
-      this.lastTouchDistance = currentDistance;
-      this.lastTouchCenter = currentCenter;
-      
-      this.updateCanvasTransform();
-    }
+    );
+    this.updateCanvasTransform();
   }
 
   onCanvasTouchEnd(event: TouchEvent) {
     // Handle touch end if needed
   }
 
-  private setupEventListenersOld() {
-    const container = this.canvasRef.nativeElement;
-    
-    // Canvas click handler
-    container.addEventListener('click', (event: MouseEvent) => {
-      if (event.target === container) {
-        this.selectedTable.set(null);
-        
-        // Add table at click position if Ctrl/Cmd is held
-        if (event.ctrlKey || event.metaKey) {
-          this.addTableAtPosition(event.offsetX, event.offsetY);
-        }
-      }
-    });
-
-    // Canvas drag handler for panning
-    container.addEventListener('mousedown', (event: MouseEvent) => {
-      if (event.target === container && event.button === 0) {
-        this.isDragging = true;
-        this.dragStart = { x: event.clientX, y: event.clientY };
-        container.style.cursor = 'grabbing';
-        event.preventDefault();
-      }
-    });
-
-    // Global mouse move for panning
-    document.addEventListener('mousemove', (event: MouseEvent) => {
-      if (this.isDragging) {
-        const deltaX = event.clientX - this.dragStart.x;
-        const deltaY = event.clientY - this.dragStart.y;
-        
-        this.canvasGrid.pan(deltaX, deltaY);
-        this.updateCanvasTransform();
-        
-        this.dragStart = { x: event.clientX, y: event.clientY };
-        event.preventDefault();
-      }
-    });
-
-    // Global mouse up
-    document.addEventListener('mouseup', () => {
-      if (this.isDragging) {
-        this.isDragging = false;
-        container.style.cursor = 'grab';
-      }
-    });
-
-    // Zoom handler with mouse wheel
-    container.addEventListener('wheel', (event: WheelEvent) => {
-      event.preventDefault();
-      const delta = event.deltaY > 0 ? 0.9 : 1.1;
-      this.canvasGrid.zoom(delta, event.offsetX, event.offsetY);
-      this.updateCanvasTransform();
-    });
-
-    // Touch events for mobile
-    container.addEventListener('touchstart', (event: TouchEvent) => {
-      this.onTouchStart(event.touches);
-    });
-
-    container.addEventListener('touchmove', (event: TouchEvent) => {
-      event.preventDefault();
-      this.onTouchMove(event.touches);
-    });
-  }
-
-  private onTouchStart(touches: TouchList) {
-    if (touches.length >= 2) {
-      const touch0 = touches[0];
-      const touch1 = touches[1];
-      
-      this.lastTouchDistance = this.getDistance(touch0, touch1);
-      this.lastTouchCenter = this.getCenter(touch0, touch1);
-    }
-  }
-
-  private onTouchMove(touches: TouchList) {
-    if (touches.length >= 2) {
-      const touch0 = touches[0];
-      const touch1 = touches[1];
-      
-      const currentDistance = this.getDistance(touch0, touch1);
-      const currentCenter = this.getCenter(touch0, touch1);
-      
-      // Zoom
-      if (this.lastTouchDistance > 0) {
-        const zoomAmount = currentDistance / this.lastTouchDistance;
-        this.canvasGrid.zoom(zoomAmount, currentCenter.x, currentCenter.y);
-      }
-      
-      // Pan
-      const deltaX = currentCenter.x - this.lastTouchCenter.x;
-      const deltaY = currentCenter.y - this.lastTouchCenter.y;
-      this.canvasGrid.pan(deltaX, deltaY);
-      
-      this.lastTouchDistance = currentDistance;
-      this.lastTouchCenter = currentCenter;
-      
-      this.updateCanvasTransform();
-    }
-  }
-
-  private getDistance(touch1: Touch, touch2: Touch): number {
-    const dx = touch1.pageX - touch2.pageX;
-    const dy = touch1.pageY - touch2.pageY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  private getCenter(touch1: Touch, touch2: Touch): { x: number, y: number } {
-    return {
-      x: (touch1.pageX + touch2.pageX) / 2,
-      y: (touch1.pageY + touch2.pageY) / 2
-    };
-  }
 
   private setupResizeListener() {
     window.addEventListener('resize', () => {
@@ -351,57 +263,121 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
   }
 
   private addTableAtPosition(x: number, y: number) {
-    // Convert screen coordinates to world coordinates
-    const worldPos = this.canvasGrid.screenToWorld(x, y);
-    
-    // Snap to grid
-    const gridPos = this.canvasGrid.snapToGrid(worldPos.x, worldPos.y);
-    
+    const gridPos = this.tablePosition.screenToWorldAndSnap(x, y);
     this.createNewTable(gridPos.x, gridPos.y);
   }
 
-  addTable() {
+  async addTable() {
+    // Check table limit first
+    if (this.projectId) {
+      const limitCheck = await this.planLimitsService.canAddTable(this.projectId);
+      
+      if (!limitCheck.canCreate) {
+        // Show limit reached dialog
+        const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+          width: '500px',
+          data: {
+            title: `Table Limit Reached (${limitCheck.current}/${limitCheck.max})`,
+            message: `Your ${limitCheck.tier.toUpperCase()} plan allows ${limitCheck.max} table(s) per project. This project has ${limitCheck.current}.\n\n${this.planLimitsService.getUpgradeMessage(limitCheck.tier, 'tables')}`,
+            confirmText: 'Upgrade Plan',
+            cancelText: 'Cancel'
+          }
+        });
+
+        dialogRef.afterClosed().subscribe((confirmed) => {
+          if (confirmed) {
+            // TODO: Redirect to upgrade page
+            this.notificationService.showInfo('Upgrade functionality coming soon!');
+          }
+        });
+        return;
+      }
+
+      // Show warning if approaching limit
+      if (limitCheck.remaining <= 2 && limitCheck.max !== 999999) {
+        this.notificationService.showWarning(
+          `You can add ${limitCheck.remaining} more table(s) on your ${limitCheck.tier.toUpperCase()} plan`
+        );
+      }
+    }
+
     // Add table at center of current view
     this.updateCanvasDimensions(); // Ensure dimensions are current
-    const centerX = 400;
-    const centerY = 300;
-    const worldPos = this.canvasGrid.screenToWorld(centerX, centerY);
-    
-    // Snap to grid
-    const gridPos = this.canvasGrid.snapToGrid(worldPos.x, worldPos.y);
-    
+    const gridPos = this.tablePosition.getViewCenterSnapped();
     this.openTableDialog('create', gridPos.x, gridPos.y);
   }
 
-  private createNewTable(x: number, y: number) {
-    const newTable: Table = {
-      id: this.generateId(),
-      name: 'New Table',
-      x: x,
-      y: y,
-      width: 280,
-      height: 150,
-      columns: [
-        {
-          id: this.generateId(),
-          name: 'id',
-          type: 'SERIAL',
-          isPrimaryKey: true,
-          isNullable: false,
-          isUnique: false,
-          isAutoIncrement: true
-        }
-      ]
-    };
+  private async createNewTable(x: number, y: number) {
+    if (!this.projectId) {
+      this.notificationService.showError('No project ID available');
+      return;
+    }
 
-    this.tables.update(tables => [...tables, newTable]);
+    try {
+      // Ensure we have the latest project version before creating table
+      await this.loadProject(this.projectId!);
+      const currentProject = this.projectService.getCurrentProject()();
+      if (!currentProject) {
+        throw new Error('No current project found');
+      }
+
+      console.log('📊 Current project version before creating table:', currentProject.version);
+
+      const newTable: Table = {
+        id: this.generateId(),
+        name: 'New Table',
+        x: x,
+        y: y,
+        width: 280,
+        height: 150,
+        columns: [
+          {
+            id: this.generateId(),
+            name: 'id',
+            type: 'SERIAL',
+            isPrimaryKey: true,
+            isNullable: false,
+            isUnique: false,
+            isAutoIncrement: true
+          }
+        ]
+      };
+
+      // Use SchemaChangeHandlerService to create table
+      await this.schemaHandler.createTable(
+        this.projectId!,
+        newTable,
+        this.tables(),
+        this.relationships(),
+        this.relationshipDisplayColumns(),
+        currentProject.version
+      );
+
+      // Reload project from Master to get updated version (Edge Function already updated it)
+      // This will automatically filter junction tables
+      await this.loadProject(this.projectId!);
+      console.log('✅ Table created and synced to Slave');
+
+    } catch (error: any) {
+      console.error('❌ Failed to create table:', error);
+      
+      // Check if it's a version conflict - reload project and show helpful message
+      if (error.message && error.message.includes('VERSION_CONFLICT')) {
+        console.log('⚠️ Version conflict detected, reloading project...');
+        await this.loadProject(this.projectId!);
+        this.notificationService.showError('The project was modified. Please try creating the table again.');
+      } else {
+        const errorMessage = error.message || 'Unknown error occurred';
+        this.notificationService.showError(`Failed to create table: ${errorMessage}`);
+      }
+    }
   }
 
   // Event handlers for table cards
   onTablePositionChanged(table: Table, position: {x: number, y: number}) {
     // Position is already in world coordinates since the card is inside the transformed container
     // Just snap to grid
-    const gridPos = this.canvasGrid.snapToGrid(position.x, position.y);
+    const gridPos = this.tablePosition.snapTablePosition(table, position);
     
     this.tables.update(tables => 
       tables.map(t => t.id === table.id ? { ...t, x: gridPos.x, y: gridPos.y } : t)
@@ -416,17 +392,8 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     this.tables.update(tables => 
       tables.map(t => t.id === event.table.id ? { ...t, x: event.x, y: event.y } : t)
     );
-    
-    // Update relationship lines in real-time
-    this.updateRelationshipLines();
   }
 
-  private updateRelationshipLines() {
-    // Force update all relationship line components
-    this.relationshipLines.forEach(line => {
-      line.updatePath();
-    });
-  }
 
   onTableSelected(table: Table) {
     this.selectedTable.set(table);
@@ -436,17 +403,63 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     this.openTableDialog('edit', table.x, table.y, table);
   }
 
-  onTableDeleted(table: Table) {
-    this.tables.update(tables => tables.filter(t => t.id !== table.id));
-    this.relationships.update(rels => 
-      rels.filter(r => r.fromTableId !== table.id && r.toTableId !== table.id)
-    );
-    if (this.selectedTable()?.id === table.id) {
-      this.selectedTable.set(null);
+  async onTableDeleted(table: Table) {
+    if (!this.projectId) {
+      this.notificationService.showError('No project ID available');
+      return;
     }
-    
-    // Auto-save after deletion
-    this.debouncedSave();
+
+    const confirmed = confirm(`Are you sure you want to delete the table "${table.name}"? This action cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      // Get current project version - ensure we have the latest
+      await this.loadProject(this.projectId);
+      const currentProject = this.projectService.getCurrentProject()();
+      if (!currentProject) {
+        throw new Error('No current project found');
+      }
+
+      console.log('🗑️ Deleting table:', {
+        tableId: table.id,
+        tableName: table.name,
+        tableInternalName: table.internal_name,
+        currentVersion: currentProject.version
+      });
+
+      // Use SchemaChangeHandlerService to delete table
+      await this.schemaHandler.deleteTable(
+        this.projectId!,
+        table.id,
+        this.tables(),
+        this.relationships(),
+        this.relationshipDisplayColumns(),
+        currentProject.version
+      );
+
+      // Reload project to sync state (Edge Function already updated Master)
+      console.log('🔄 Reloading project after table deletion...');
+      await this.loadProject(this.projectId);
+      
+      // Clear selection if this table was selected
+      if (this.selectedTable()?.id === table.id) {
+        this.selectedTable.set(null);
+      }
+
+    } catch (error: any) {
+      console.error('Failed to delete table:', error);
+      
+      // Check if it's a version conflict - reload project and show helpful message
+      if (error.message && error.message.includes('VERSION_CONFLICT')) {
+        console.log('⚠️ Version conflict detected, reloading project...');
+        await this.loadProject(this.projectId);
+        this.notificationService.showError('The project was modified. Please try deleting the table again.');
+      } else {
+        this.notificationService.showError(`Failed to delete table: ${error.message}`);
+      }
+    }
   }
 
   private openTableDialog(mode: 'create' | 'edit', x: number, y: number, table?: Table) {
@@ -461,46 +474,97 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
       data: dialogData
     });
 
-        dialogRef.afterClosed().subscribe(result => {
-          console.log('Table dialog closed with result:', result);
+    dialogRef.afterClosed().subscribe(async (result) => {
+      console.log('📝 Table dialog closed with result:', result);
+      
+      if (result) {
+        if (mode === 'create') {
+          // Set position for new table
+          result.x = x;
+          result.y = y;
+          console.log('📝 Creating new table via Edge Function:', result.name);
           
-          if (result) {
-            if (mode === 'create') {
-              // Set position for new table
-              result.x = x;
-              result.y = y;
-              console.log('Creating new table:', result);
-              this.tables.update(tables => [...tables, result]);
-            } else {
-              // Update existing table
-              console.log('Updating existing table:', result);
-              this.tables.update(tables => 
-                tables.map(t => t.id === result.id ? result : t)
-              );
-            }
+          // Use SchemaChangeHandlerService to create table
+          await this.schemaHandler.createTable(
+            this.projectId!,
+            result,
+            this.tables(),
+            this.relationships(),
+            this.relationshipDisplayColumns(),
+            this.projectService.getCurrentProject()()?.version || 0
+          );
+          
+          // Reload project to sync state
+          await this.loadProject(this.projectId!);
+        } else {
+          // Update existing table
+          console.log('Updating existing table:', result);
+          console.log('🔍 Mode: edit | ProjectId:', this.projectId, '| Has old table:', !!table);
+          
+          if (this.projectId && table) {
+            // Use SchemaChangeHandlerService to update table
+            await this.schemaHandler.applyTableEdits(
+              this.projectId!,
+              table,
+              result,
+              this.tables(),
+              this.relationships(),
+              this.relationshipDisplayColumns()
+            );
             
-            // Auto-save after create/edit
-            console.log('Triggering debounced save after table operation');
-            this.debouncedSave();
+            // Reload project to sync state
+            await this.loadProject(this.projectId!);
           } else {
-            console.log('Table dialog cancelled');
+            // Fallback: just update JSON
+            console.log('⚠️ Skipping table update - projectId:', this.projectId, 'table:', !!table);
+            this.tables.update(tables => 
+              tables.map(t => t.id === result.id ? result : t)
+            );
+            this.debouncedSave();
           }
-        });
+        }
+      } else {
+        console.log('Table dialog cancelled');
+      }
+    });
   }
 
   private generateId(): string {
-    return Math.random().toString(36).substr(2, 9);
+    return this.relationshipDisplay.generateId();
   }
 
-  deleteSelectedTable() {
+  /**
+   * Filter out junction tables from the tables array
+   * Delegates to JunctionTableFilterService
+   */
+  private filterJunctionTablesFromState(tables: Table[], relationships: Relationship[]): Table[] {
+    return this.junctionFilter.filterJunctionTables(tables, relationships);
+  }
+
+  private getCurrentSchema(): ProjectSchema {
+    const currentProject = this.projectService.getCurrentProject()();
+    return {
+      tables: this.tables(),
+      relationships: this.relationships(),
+      relationshipDisplayColumns: this.relationshipDisplayColumns(),
+      metadata: {
+        name: currentProject?.name || 'Untitled Project',
+        description: currentProject?.description || '',
+        version: '1.0.0'
+      }
+    };
+  }
+
+
+
+  async deleteSelectedTable() {
     const selected = this.selectedTable();
-    if (selected) {
-      this.tables.update(tables => tables.filter(t => t.id !== selected.id));
-      this.relationships.update(rels => 
-        rels.filter(r => r.fromTableId !== selected.id && r.toTableId !== selected.id)
-      );
-      this.selectedTable.set(null);
+    if (!selected || !this.projectId) {
+      return;
     }
+
+    // ✅ Delegate to onTableDeleted which uses Edge Function for Slave sync
+    await this.onTableDeleted(selected);
   }
 
   generateSQL() {
@@ -529,14 +593,30 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
           tablesCount: project.schemaData.tables.length
         });
         
-        this.tables.set(project.schemaData.tables);
+        // ✅ Filter out junction tables before setting state (double-check)
+        const filteredTables = this.filterJunctionTablesFromState(
+          project.schemaData.tables,
+          project.schemaData.relationships
+        );
+        
+        const filteredCount = project.schemaData.tables.length - filteredTables.length;
+        console.log(`🔍 Filtering junction tables: ${filteredCount} filtered out of ${project.schemaData.tables.length}`);
+        if (filteredCount > 0) {
+          const junctionTables = project.schemaData.tables.filter(t => 
+            !filteredTables.some(ft => ft.id === t.id)
+          );
+          console.log('🔍 Junction tables found:', junctionTables.map(t => ({ id: t.id, name: t.name })));
+        }
+        
+        this.tables.set(filteredTables);
         this.relationships.set(project.schemaData.relationships);
         
         // Load existing relationship display columns or create them for existing relationships
         const existingDisplayColumns = project.schemaData.relationshipDisplayColumns || [];
-        const createdDisplayColumns = this.createMissingRelationshipDisplayColumns(
+        const createdDisplayColumns = this.relationshipDisplay.createMissingRelationshipDisplayColumns(
           project.schemaData.relationships,
-          existingDisplayColumns
+          existingDisplayColumns,
+          filteredTables
         );
         
         this.relationshipDisplayColumns.set([...existingDisplayColumns, ...createdDisplayColumns]);
@@ -556,115 +636,6 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     }
   }
 
-  private async initializeProject() {
-    console.log('Initializing project...');
-    const currentProject = this.projectService.getCurrentProject()();
-    console.log('Current project:', currentProject);
-    
-    if (currentProject) {
-      console.log('Loading existing project data:', {
-        tablesCount: currentProject.schemaData.tables.length,
-        relationshipsCount: currentProject.schemaData.relationships.length,
-        tables: currentProject.schemaData.tables
-      });
-      // Load existing project
-      this.tables.set(currentProject.schemaData.tables);
-      this.relationships.set(currentProject.schemaData.relationships);
-    } else {
-      console.log('No current project found, creating demo project');
-      // Create a demo project for testing
-      await this.createDemoProject();
-    }
-  }
-
-  private async createDemoProject() {
-    try {
-      console.log('Creating demo project...');
-      const project = await this.projectService.createProject('Demo Project', 'A sample project to get started');
-      console.log('Demo project created:', project);
-      
-      // Add a sample table
-      const sampleTable: Table = {
-        id: this.generateId(),
-        name: 'users',
-        x: 100,
-        y: 100,
-        width: 280,
-        height: 150,
-        columns: [
-          {
-            id: this.generateId(),
-            name: 'id',
-            type: 'SERIAL',
-            isPrimaryKey: true,
-            isNullable: false,
-            isUnique: false,
-            isAutoIncrement: true
-          },
-          {
-            id: this.generateId(),
-            name: 'email',
-            type: 'VARCHAR(255)',
-            isPrimaryKey: false,
-            isNullable: false,
-            isUnique: true
-          },
-          {
-            id: this.generateId(),
-            name: 'name',
-            type: 'VARCHAR(255)',
-            isPrimaryKey: false,
-            isNullable: false,
-            isUnique: false
-          }
-        ]
-      };
-
-      console.log('Setting sample table:', sampleTable);
-      this.tables.set([sampleTable]);
-      console.log('Saving current state after demo project creation...');
-      await this.saveCurrentState();
-    } catch (error) {
-      console.error('Error creating demo project:', error);
-      console.error('Demo project error details:', JSON.stringify(error, null, 2));
-      console.log('Falling back to local test table');
-      // Fallback to local test table
-      this.addTestTable();
-    }
-  }
-
-  private addTestTable() {
-    // Add a test table at the center (fallback)
-    const testTable: Table = {
-      id: this.generateId(),
-      name: 'Test Table',
-      x: 100,
-      y: 100,
-      width: 280,
-      height: 150,
-      columns: [
-        {
-          id: this.generateId(),
-          name: 'id',
-          type: 'SERIAL',
-          isPrimaryKey: true,
-          isNullable: false,
-          isUnique: false,
-          isAutoIncrement: true
-        },
-        {
-          id: this.generateId(),
-          name: 'name',
-          type: 'VARCHAR(255)',
-          isPrimaryKey: false,
-          isNullable: false,
-          isUnique: false
-        }
-      ]
-    };
-
-    this.tables.update(tables => [...tables, testTable]);
-  }
 
   private async saveCurrentState() {
     const currentProject = this.projectService.getCurrentProject()();
@@ -728,14 +699,14 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
       data: dialogData
     });
 
-    dialogRef.afterClosed().subscribe((toTable: Table | undefined) => {
+    dialogRef.afterClosed().subscribe(async (toTable: Table | undefined) => {
       if (toTable) {
-        this.createAutoRelationship(fromTable, toTable);
+        await this.createAutoRelationship(fromTable, toTable);
       }
     });
   }
 
-  private createAutoRelationship(fromTable: Table, toTable: Table): void {
+  private async createAutoRelationship(fromTable: Table, toTable: Table): Promise<void> {
     // Validate that both tables have primary keys
     const fromPK = fromTable.columns.find(c => c.isPrimaryKey);
     const toPK = toTable.columns.find(c => c.isPrimaryKey);
@@ -764,6 +735,7 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     const foreignKeyColumn: TableColumn = {
       id: this.generateId(),
       name: foreignKeyColumnName,
+      internal_name: `c_${this.generateId()}`, // ✅ Generate internal_name for foreign key column
       type: fromPK.type, // Match the type of the primary key
       isPrimaryKey: false,
       isNullable: true, // Foreign keys can be nullable
@@ -815,8 +787,57 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
 
     this.relationships.update(rels => [...rels, newRelationship]);
     this.relationshipDisplayColumns.update(displayCols => [...displayCols, relationshipDisplayColumn]);
+    
+    // ✅ Apply DDL to Slave atomically
+    if (this.projectId) {
+      const changes: SchemaChange[] = [];
+      
+      // 1. Add the FK column to the target table
+      const tableNameForDB = updatedToTable.internal_name || `t_${updatedToTable.id}`;
+      changes.push({
+        type: 'add_column',
+        table_name: tableNameForDB,
+        column: {
+          id: foreignKeyColumn.id, // ✅ Include column ID for masked name generation
+          name: foreignKeyColumn.name,
+          internal_name: foreignKeyColumn.internal_name || `c_${foreignKeyColumn.id}`, // ✅ Include internal_name
+          type: foreignKeyColumn.type,
+          nullable: foreignKeyColumn.isNullable,
+          default: foreignKeyColumn.defaultValue
+        }
+      });
+      
+      // 2. Add the foreign key constraint
+      const fromTableNameForDB = fromTable.internal_name || `t_${fromTable.id}`;
+      changes.push({
+        type: 'add_foreign_key',
+        foreign_key: {
+          table_name: tableNameForDB,
+          column_name: foreignKeyColumn.internal_name || `c_${foreignKeyColumn.id}`,
+          column_internal_name: foreignKeyColumn.internal_name, // ✅ Send internal_name directly
+          referenced_table: fromTableNameForDB,
+          referenced_column: fromPK.internal_name || `c_${fromPK.id}`,
+          referenced_column_internal_name: fromPK.internal_name, // ✅ Send internal_name directly
+          constraint_name: `fk_${newRelationship.name}`
+        }
+      });
+      
+      // Apply changes using SchemaChangeHandlerService
+      // Use toTable as both old and new since we're just adding a column to it
+      await this.schemaHandler.applyTableEdits(
+        this.projectId!,
+        toTable,
+        updatedToTable,
+        this.tables(),
+        this.relationships(),
+        this.relationshipDisplayColumns()
+      );
+      
+      // Reload project to sync state
+      await this.loadProject(this.projectId!);
+    }
+    
     this.notificationService.showSuccess(`Created relationship: ${fromTable.name} -> ${toTable.name} (added ${foreignKeyColumnName} column)`);
-    this.debouncedSave();
   }
 
   // Advanced relationship creation (from menu)
@@ -831,17 +852,155 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
       data: dialogData
     });
 
-    dialogRef.afterClosed().subscribe(result => {
-      if (result) {
-        this.relationships.update(rels => [...rels, result as Relationship]);
-        this.debouncedSave();
+    dialogRef.afterClosed().subscribe(async (result) => {
+      if (result && this.projectId) {
+        const relationship = result as Relationship;
+        
+        // 1. Update local state optimistically
+        this.relationships.update(rels => [...rels, relationship]);
+
+        // 2. Prepare schema change
+        // ✅ Use internal_name for table references
+        const toTable = this.getTableById(relationship.toTableId);
+        const fromTable = this.getTableById(relationship.fromTableId);
+        
+        if (!toTable || !fromTable) {
+          this.notificationService.showError('Cannot create relationship: Table not found');
+          this.relationships.update(rels => rels.filter(r => r.id !== relationship.id)); // Remove from local state
+          return;
+        }
+        
+        const toColumn = toTable.columns.find(c => c.id === relationship.toColumnId);
+        const fromColumn = fromTable.columns.find(c => c.id === relationship.fromColumnId);
+        
+        if (!toColumn || !fromColumn) {
+          this.notificationService.showError('Cannot create relationship: Column not found');
+          this.relationships.update(rels => rels.filter(r => r.id !== relationship.id)); // Remove from local state
+          return;
+        }
+        
+        const change: SchemaChange = {
+          type: 'add_foreign_key',
+          foreign_key: {
+            table_name: toTable.internal_name || `t_${toTable.id}`,
+            table_internal_name: toTable.internal_name, // ✅ Send internal_name explicitly
+            column_name: toColumn.internal_name || `c_${toColumn.id}`,
+            column_internal_name: toColumn.internal_name, // ✅ Send internal_name directly
+            referenced_table: fromTable.internal_name || `t_${fromTable.id}`,
+            referenced_table_internal_name: fromTable.internal_name, // ✅ Send internal_name explicitly
+            referenced_column: fromColumn.internal_name || `c_${fromColumn.id}`,
+            referenced_column_internal_name: fromColumn.internal_name, // ✅ Send internal_name directly
+            constraint_name: relationship.name ? `fk_${relationship.name.replace(/\s+/g, '_')}` : `fk_${toTable.internal_name || toTable.id}_${toColumn.internal_name || toColumn.id}`,
+            on_delete: relationship.onDelete || 'NO ACTION',
+            on_update: relationship.onUpdate || 'NO ACTION'
+          }
+        };
+
+        // 3. Get current schema data and version
+        const currentProject = this.projectService.getCurrentProject()();
+        if (!currentProject) {
+          this.notificationService.showError('No current project found');
+          this.relationships.update(rels => rels.filter(r => r.id !== relationship.id));
+          return;
+        }
+
+        const currentSchema = this.getCurrentSchema();
+        const currentVersion = currentProject.version;
+
+        // 4. Use synchronous approach - call applySchemaChange directly with the properly formatted change
+        try {
+          const result = await this.notificationService.showOperationStatus(
+            async () => {
+              const changeResult = await this.eventDrivenSchema.applySchemaChange(
+                this.projectId!,
+                change,
+                currentSchema,
+                currentVersion
+              );
+
+              if (!changeResult.success) {
+                throw new Error(changeResult.error || 'Failed to create relationship');
+              }
+
+              return changeResult;
+            },
+            'Creating relationship...',
+            'Relationship created successfully'
+          );
+
+          // Reload project to get updated version
+          await this.loadProject(this.projectId!);
+        } catch (error: any) {
+          // Rollback local state if error
+          this.relationships.update(rels => rels.filter(r => r.id !== relationship.id));
+          
+          // Error notification already shown by showOperationStatus
+          // Just reload project if version conflict
+          if (error.message && error.message.includes('VERSION_CONFLICT')) {
+            await this.loadProject(this.projectId!);
+          }
+        }
       }
     });
   }
 
-  deleteRelationship(relationshipId: string): void {
+  async deleteRelationship(relationshipId: string): Promise<void> {
+    if (!this.projectId) {
+      this.notificationService.showError('No project ID available');
+      return;
+    }
+
+    const relationship = this.relationships().find(r => r.id === relationshipId);
+    if (!relationship) {
+      return;
+    }
+
+    // 1. Update local state optimistically
     this.relationships.update(rels => rels.filter(r => r.id !== relationshipId));
-    this.debouncedSave();
+
+    // 2. Prepare schema change
+    // ✅ Use internal_name for table references
+    const toTable = this.getTableById(relationship.toTableId);
+    const fromTable = this.getTableById(relationship.fromTableId);
+    
+    const toColumn = toTable?.columns.find(c => c.id === relationship.toColumnId);
+    const fromColumn = fromTable?.columns.find(c => c.id === relationship.fromColumnId);
+    
+    const change: SchemaChange = {
+      type: 'drop_foreign_key',
+      foreign_key: {
+        table_name: toTable?.internal_name || toTable?.name || '',
+        column_name: toColumn?.name || '',
+        column_id: toColumn?.id, // ✅ Include column ID for masked name generation
+        referenced_table: fromTable?.internal_name || fromTable?.name || '',
+        referenced_column: fromColumn?.name || '',
+        referenced_column_id: fromColumn?.id, // ✅ Include referenced column ID for masked name generation
+        constraint_name: `fk_${relationship.name}`
+      }
+    };
+
+    // 3. Get current schema data
+    const currentSchema = this.getCurrentSchema();
+
+    // 4. Use synchronous approach
+    try {
+      const result = await this.eventDrivenSchema.deleteRelationship(
+        this.projectId,
+        relationshipId,
+        this.getCurrentSchema(),
+        this.projectService.getCurrentProject()()?.version || 0
+      );
+
+      if (!result.success) {
+        // Rollback local state if failed
+        this.relationships.update(rels => [...rels, relationship]);
+        this.notificationService.showError(result.error || 'Failed to delete relationship');
+      }
+    } catch (error: any) {
+      // Rollback local state if error
+      this.relationships.update(rels => [...rels, relationship]);
+      this.notificationService.showError(error.message || 'Failed to delete relationship');
+    }
   }
 
   // Navigation methods (now handled by shared layout)
@@ -859,84 +1018,12 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
 
   // Helper to get relationship display column for a specific relationship
   getRelationshipDisplayColumnForRelationship(relationshipId: string): RelationshipDisplayColumn | undefined {
-    const displayColumn = this.relationshipDisplayColumns().find(col => col.relationshipId === relationshipId && col.isVisible);
-    
-    // If no display column found, create one on the fly
-    if (!displayColumn) {
-      const relationship = this.relationships().find(r => r.id === relationshipId);
-      if (relationship) {
-        const fromTable = this.tables().find(t => t.id === relationship.fromTableId);
-        const toTable = this.tables().find(t => t.id === relationship.toTableId);
-        
-        if (fromTable && toTable) {
-          const fromPK = fromTable.columns.find(c => c.isPrimaryKey);
-          if (fromPK) {
-            const newDisplayColumn: RelationshipDisplayColumn = {
-              id: this.generateId(),
-              relationshipId: relationshipId,
-              tableId: toTable.id,
-              sourceTableId: fromTable.id,
-              fields: [{
-                sourceColumnId: fromPK.id,
-                displayName: `${fromTable.name}_${fromPK.name}`,
-                isVisible: true
-              }],
-              isVisible: true
-            };
-            
-            // Add it to the signal
-            this.relationshipDisplayColumns.update(cols => [...cols, newDisplayColumn]);
-            return newDisplayColumn;
-          }
-        }
-      }
-    }
-    
-    return displayColumn;
-  }
-
-  // Create relationship display columns for existing relationships that don't have them
-  private createMissingRelationshipDisplayColumns(
-    relationships: Relationship[], 
-    existingDisplayColumns: RelationshipDisplayColumn[]
-  ): RelationshipDisplayColumn[] {
-    const createdColumns: RelationshipDisplayColumn[] = [];
-    
-    relationships.forEach(relationship => {
-      // Check if this relationship already has a display column
-      const hasDisplayColumn = existingDisplayColumns.some(col => col.relationshipId === relationship.id);
-      
-      if (!hasDisplayColumn) {
-        // Get the tables involved in the relationship
-        const fromTable = this.tables().find(t => t.id === relationship.fromTableId);
-        const toTable = this.tables().find(t => t.id === relationship.toTableId);
-        
-        if (fromTable && toTable) {
-          // Find the primary key of the source table
-          const fromPK = fromTable.columns.find(c => c.isPrimaryKey);
-          
-          if (fromPK) {
-            // Create a relationship display column for the target table
-            const relationshipDisplayColumn: RelationshipDisplayColumn = {
-              id: this.generateId(),
-              relationshipId: relationship.id,
-              tableId: toTable.id, // Display in the target table
-              sourceTableId: fromTable.id,
-              fields: [{
-                sourceColumnId: fromPK.id,
-                displayName: `${fromTable.name}_${fromPK.name}`,
-                isVisible: true
-              }],
-              isVisible: true
-            };
-            
-            createdColumns.push(relationshipDisplayColumn);
-          }
-        }
-      }
-    });
-    
-    return createdColumns;
+    return this.relationshipDisplay.getRelationshipDisplayColumnForRelationship(
+      relationshipId,
+      this.relationshipDisplayColumns(),
+      this.relationships(),
+      this.tables()
+    );
   }
 
   // Update relationship display column
@@ -1000,7 +1087,7 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
   }
 
   // Handle relationship type change from context menu
-  onRelationshipTypeChanged(event: { relationship: Relationship; newType: string }): void {
+  async onRelationshipTypeChanged(event: { relationship: Relationship; newType: string }): Promise<void> {
     const { relationship, newType } = event;
     
     // Get the tables involved in the relationship
@@ -1021,16 +1108,60 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
       return;
     }
     
-    // Update the relationship type
-    const updatedRelationship: Relationship = {
-      ...relationship,
-      type: newType as 'one-to-one' | 'one-to-many' | 'many-to-many'
-    };
+    // Handle different relationship types using RelationshipConversionService
+    if (newType === 'one-to-many') {
+      await this.relationshipConversion.convertToOneToMany(
+        this.projectId!,
+        relationship,
+        fromTable,
+        toTable,
+        fromPK,
+        this.tables()
+      );
+    } else if (newType === 'many-to-many') {
+      const junctionInfo = await this.relationshipConversion.convertToManyToMany(
+        this.projectId!,
+        relationship,
+        fromTable,
+        toTable,
+        fromPK,
+        toPK,
+        this.tables(),
+        this.relationships()
+      );
+      
+      // Update relationship with junction table info
+      const updatedRelationship: Relationship = {
+        ...relationship,
+        type: 'many-to-many',
+        junctionTableId: junctionInfo.junctionTableId,
+        junctionTableInternalName: junctionInfo.junctionTableInternalName
+      };
+      
+      this.relationships.update(rels => 
+        rels.map(rel => rel.id === relationship.id ? updatedRelationship : rel)
+      );
+    } else if (newType === 'one-to-one') {
+      await this.relationshipConversion.convertToOneToOne(
+        this.projectId!,
+        relationship,
+        fromTable,
+        toTable,
+        fromPK
+      );
+    }
     
-    // Update the relationships array
-    this.relationships.update(rels => 
-      rels.map(rel => rel.id === relationship.id ? updatedRelationship : rel)
-    );
+    // Update the relationships array (already updated for many-to-many above)
+    if (newType !== 'many-to-many') {
+      const updatedRelationship: Relationship = {
+        ...relationship,
+        type: newType as 'one-to-one' | 'one-to-many' | 'many-to-many'
+      };
+      
+      this.relationships.update(rels => 
+        rels.map(rel => rel.id === relationship.id ? updatedRelationship : rel)
+      );
+    }
     
     // Show notification
     this.notificationService.showSuccess(
@@ -1041,54 +1172,111 @@ export class DiagramEditorComponent implements AfterViewInit, OnInit, OnDestroy 
     this.debouncedSave();
   }
 
+
   // Handle relationship deletion from context menu
-  onRelationshipDeleted(relationship: Relationship): void {
-    // Get the tables involved in the relationship
-    const fromTable = this.getTableById(relationship.fromTableId);
-    const toTable = this.getTableById(relationship.toTableId);
-    
-    if (fromTable && toTable) {
-      // Find the foreign key column that was created for this relationship
-      const foreignKeyColumn = toTable.columns.find(col => 
-        col.isForeignKey && 
-        col.referencedTableId === relationship.fromTableId &&
-        col.referencedColumnId === relationship.fromColumnId
-      );
-      
-      if (foreignKeyColumn) {
-        // Remove the foreign key column from the target table
-        const updatedToTable = {
-          ...toTable,
-          columns: toTable.columns.filter(col => col.id !== foreignKeyColumn.id)
-        };
-        
-        // Update the tables array
-        this.tables.update(tables => 
-          tables.map(table => table.id === toTable.id ? updatedToTable : table)
-        );
-        
-        this.notificationService.showSuccess(
-          `Relationship deleted and foreign key column "${foreignKeyColumn.name}" removed from table "${toTable.name}"`
-        );
-      } else {
-        this.notificationService.showSuccess('Relationship deleted successfully');
-      }
-    } else {
-      this.notificationService.showSuccess('Relationship deleted successfully');
+  async onRelationshipDeleted(relationship: Relationship): Promise<void> {
+    if (!this.projectId) {
+      this.notificationService.showError('No project ID available');
+      return;
     }
-    
-    // Remove the relationship from the array
-    this.relationships.update(rels => 
-      rels.filter(rel => rel.id !== relationship.id)
-    );
-    
-    // Remove the relationship display column
-    this.relationshipDisplayColumns.update(displayCols => 
-      displayCols.filter(col => col.relationshipId !== relationship.id)
-    );
-    
-    // Save changes
-    this.debouncedSave();
+
+    try {
+      // Get current project version
+      const currentProject = this.projectService.getCurrentProject()();
+      if (!currentProject) {
+        throw new Error('No current project found');
+      }
+
+      // ✅ If it's a many-to-many relationship, need to delete junction table and FKs from Slave
+      if (relationship.type === 'many-to-many') {
+        // First, delete the foreign keys from the junction table
+        const fromTable = this.getTableById(relationship.fromTableId);
+        const toTable = this.getTableById(relationship.toTableId);
+        
+        if (!fromTable || !toTable) {
+          throw new Error('Cannot find tables for relationship');
+        }
+
+        // Get junction table info from relationship
+        const junctionTableInternalName = relationship.junctionTableInternalName;
+        
+        if (junctionTableInternalName) {
+          // Delete the junction table (which will cascade delete the FKs)
+          const deleteTableChange: SchemaChange = {
+            type: 'drop_table',
+            table_name: junctionTableInternalName
+          };
+
+          const currentSchema = this.getCurrentSchema();
+          const schemaWithoutRelationship = {
+            ...currentSchema,
+            relationships: currentSchema.relationships.filter(rel => rel.id !== relationship.id),
+            relationshipDisplayColumns: currentSchema.relationshipDisplayColumns.filter(col => col.relationshipId !== relationship.id)
+          };
+
+          const result = await this.eventDrivenSchema.applySchemaChange(
+            this.projectId,
+            deleteTableChange,
+            schemaWithoutRelationship,
+            currentProject.version
+          );
+
+          if (!result.success) {
+            throw new Error(result.error || 'Failed to delete junction table');
+          }
+
+          // Reload project to sync state
+          await this.loadProject(this.projectId);
+          this.notificationService.showSuccess('Many-to-many relationship and junction table deleted successfully');
+          return;
+        }
+      }
+
+      // For regular relationships (1:1, 1:M), delete the foreign key constraint
+      console.log('🗑️ Deleting relationship:', {
+        relationshipId: relationship.id,
+        relationshipType: relationship.type,
+        fromTableId: relationship.fromTableId,
+        toTableId: relationship.toTableId,
+        currentVersion: currentProject.version
+      });
+
+      const currentSchema = this.getCurrentSchema();
+      const schemaWithoutRelationship = {
+        ...currentSchema,
+        relationships: currentSchema.relationships.filter(rel => rel.id !== relationship.id),
+        relationshipDisplayColumns: currentSchema.relationshipDisplayColumns.filter(col => col.relationshipId !== relationship.id)
+      };
+
+      const result = await this.notificationService.showOperationStatus(
+        async () => {
+          const deleteResult = await this.eventDrivenSchema.deleteRelationship(
+            this.projectId!,
+            relationship.id,
+            schemaWithoutRelationship,
+            currentProject.version
+          );
+
+          console.log('🗑️ Delete relationship result:', deleteResult);
+
+          if (!deleteResult.success) {
+            throw new Error(deleteResult.error || 'Failed to delete relationship');
+          }
+
+          return deleteResult;
+        },
+        'Deleting relationship...',
+        'Relationship deleted successfully'
+      );
+
+      // Reload project to sync state
+      console.log('🔄 Reloading project after relationship deletion...');
+      await this.loadProject(this.projectId);
+
+    } catch (error: any) {
+      console.error('Failed to delete relationship:', error);
+      this.notificationService.showError(`Failed to delete relationship: ${error.message}`);
+    }
   }
 
   // Helper to get relationship type label

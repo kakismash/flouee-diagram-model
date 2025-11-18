@@ -11,8 +11,10 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
 import { ProjectService, Project } from '../../services/project.service';
 import { NotificationService } from '../../services/notification.service';
+import { PlanLimitsService } from '../../services/plan-limits.service';
 import { ProjectDialogComponent } from '../project-dialog/project-dialog.component';
 import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component';
+import { RealtimeCountersComponent } from '../realtime-counters/realtime-counters.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -25,7 +27,8 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
     MatToolbarModule,
     MatMenuModule,
     MatDialogModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    RealtimeCountersComponent
   ],
   template: `
     <div class="dashboard">
@@ -38,6 +41,12 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
             New Project
           </button>
         </div>
+
+        <!-- Real-time Counters -->
+        <app-realtime-counters 
+          *ngIf="authService.user()?.organization_id" 
+          [organizationId]="authService.user()!.organization_id">
+        </app-realtime-counters>
 
         <!-- Loading State -->
         <div *ngIf="isLoading()" class="loading-container">
@@ -58,13 +67,16 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
 
         <!-- Projects Grid -->
         <div *ngIf="!isLoading() && projects().length > 0" class="projects-grid">
-          <mat-card *ngFor="let project of projects()" class="project-card" (click)="openProject(project)">
-            <mat-card-header>
-              <mat-icon mat-card-avatar>account_tree</mat-icon>
-              <mat-card-title>{{ project.name }}</mat-card-title>
-              <mat-card-subtitle>{{ project.description || 'No description' }}</mat-card-subtitle>
-              
-              <button mat-icon-button [matMenuTriggerFor]="projectMenu" (click)="$event.stopPropagation()">
+          <mat-card *ngFor="let project of projects()" class="project-card">
+            <div class="project-card-header">
+              <div class="project-card-icon">
+                <mat-icon>account_tree</mat-icon>
+              </div>
+              <div class="project-card-title-section">
+                <h3 class="project-title">{{ project.name }}</h3>
+                <p class="project-description">{{ project.description || 'No description' }}</p>
+              </div>
+              <button mat-icon-button [matMenuTriggerFor]="projectMenu" (click)="$event.stopPropagation()" class="menu-button">
                 <mat-icon>more_vert</mat-icon>
               </button>
               <mat-menu #projectMenu="matMenu">
@@ -77,27 +89,34 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
                   <span>Delete</span>
                 </button>
               </mat-menu>
-            </mat-card-header>
+            </div>
             
-            <mat-card-content>
-              <div class="project-stats">
-                <div class="stat">
-                  <mat-icon>table_chart</mat-icon>
-                  <span>{{ getTableCount(project) }} tables</span>
-                </div>
-                <div class="stat">
-                  <mat-icon>access_time</mat-icon>
-                  <span>{{ formatDate(project.updatedAt) }}</span>
+            <div class="project-card-stats">
+              <div class="stat-item">
+                <mat-icon class="stat-icon">table_chart</mat-icon>
+                <div class="stat-content">
+                  <span class="stat-value">{{ getTableCount(project) }}</span>
+                  <span class="stat-label">tables</span>
                 </div>
               </div>
-            </mat-card-content>
+              <div class="stat-item">
+                <mat-icon class="stat-icon">access_time</mat-icon>
+                <div class="stat-content">
+                  <span class="stat-value">{{ formatDate(project.updatedAt) }}</span>
+                </div>
+              </div>
+            </div>
             
-            <mat-card-actions>
-              <button mat-button color="primary" (click)="openProject(project); $event.stopPropagation()">
-                <mat-icon>open_in_new</mat-icon>
-                Open
+            <div class="project-card-actions">
+              <button mat-raised-button color="primary" (click)="openProject(project, 'editor'); $event.stopPropagation()" class="action-button">
+                <mat-icon>account_tree</mat-icon>
+                <span>Editor</span>
               </button>
-            </mat-card-actions>
+              <button mat-raised-button color="primary" (click)="openProject(project, 'view'); $event.stopPropagation()" class="action-button">
+                <mat-icon>table_chart</mat-icon>
+                <span>Tables</span>
+              </button>
+            </div>
           </mat-card>
         </div>
       </div>
@@ -172,79 +191,182 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
 
     .projects-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap: 24px;
+      padding: 0;
+    }
+
+    @media (max-width: 768px) {
+      .projects-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+    }
+
+    @media (min-width: 1200px) {
+      .projects-grid {
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      }
     }
 
     .project-card {
-      cursor: pointer;
-      transition: all 0.2s ease;
+      cursor: default;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
       background: var(--theme-surface);
       color: var(--theme-text-primary);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--theme-border, rgba(0, 0, 0, 0.12));
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
     }
 
     .project-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 16px var(--theme-shadow);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+      transform: translateY(-2px);
+      border-color: var(--theme-primary, rgba(0, 0, 0, 0.2));
     }
 
-    .project-card mat-card-header {
+    .project-card-header {
+      display: flex;
+      align-items: flex-start;
+      padding: 20px 20px 16px 20px;
+      gap: 16px;
+      position: relative;
+    }
+
+    .project-card-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--theme-primary, #1976d2) 0%, var(--theme-primary-dark, #1565c0) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .project-card-icon mat-icon {
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+      color: white;
+    }
+
+    .project-card-title-section {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .project-title {
+      margin: 0 0 4px 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--theme-text-primary);
+      line-height: 1.3;
+      word-wrap: break-word;
+    }
+
+    .project-description {
+      margin: 0;
+      font-size: 14px;
+      color: var(--theme-text-secondary);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .menu-button {
+      position: absolute;
+      top: 12px;
+      right: 8px;
+      color: var(--theme-text-secondary);
+    }
+
+    .menu-button:hover {
+      background-color: var(--theme-hover, rgba(0, 0, 0, 0.04));
+    }
+
+    .project-card-stats {
+      display: flex;
+      gap: 24px;
+      padding: 0 20px 16px 20px;
+      border-bottom: 1px solid var(--theme-border, rgba(0, 0, 0, 0.08));
       margin-bottom: 16px;
     }
 
-    .project-card mat-card-title {
-      color: var(--theme-text-primary);
-    }
-
-    .project-card mat-card-subtitle {
-      color: var(--theme-text-secondary);
-    }
-
-    .project-card mat-icon[mat-card-avatar] {
-      font-size: 40px;
-      width: 40px;
-      height: 40px;
-      color: var(--theme-primary);
-    }
-
-    .project-stats {
-      display: flex;
-      gap: 16px;
-      margin-top: 8px;
-    }
-
-    .stat {
+    .stat-item {
       display: flex;
       align-items: center;
-      gap: 8px;
-      color: var(--theme-text-secondary);
-      font-size: 14px;
+      gap: 10px;
     }
 
-    .stat mat-icon {
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
+    .stat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
       color: var(--theme-text-disabled);
     }
 
-    mat-card-actions {
-      padding: 8px 16px;
+    .stat-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--theme-text-primary);
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--theme-text-secondary);
+      text-transform: lowercase;
+    }
+
+    .project-card-actions {
+      padding: 0 20px 20px 20px;
+      display: flex;
+      gap: 12px;
+    }
+
+    .action-button {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-weight: 500;
+      text-transform: none;
+      transition: all 0.2s ease;
+    }
+
+    .action-button mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .action-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
     }
 
     /* Material theme overrides */
     .dashboard ::ng-deep .mat-mdc-card {
       background: var(--theme-surface);
       color: var(--theme-text-primary);
-    }
-
-    .dashboard ::ng-deep .mat-mdc-card-title {
-      color: var(--theme-text-primary);
-    }
-
-    .dashboard ::ng-deep .mat-mdc-card-subtitle {
-      color: var(--theme-text-secondary);
     }
 
     .dashboard ::ng-deep .mat-mdc-menu-panel {
@@ -258,19 +380,6 @@ import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.compone
     .dashboard ::ng-deep .mat-mdc-menu-item:hover {
       background: var(--theme-hover);
     }
-
-    .dashboard ::ng-deep .mat-mdc-button {
-      color: var(--theme-text-primary);
-    }
-
-    .dashboard ::ng-deep .mat-mdc-raised-button {
-      background: var(--theme-primary);
-      color: var(--theme-on-primary);
-    }
-
-    .dashboard ::ng-deep .mat-mdc-raised-button:hover {
-      background: var(--theme-primary-dark);
-    }
   `]
 })
 export class DashboardComponent implements OnInit {
@@ -280,6 +389,7 @@ export class DashboardComponent implements OnInit {
   constructor(
     public authService: AuthService,
     private projectService: ProjectService,
+    private planLimitsService: PlanLimitsService,
     private router: Router,
     private dialog: MatDialog,
     private notificationService: NotificationService
@@ -292,8 +402,15 @@ export class DashboardComponent implements OnInit {
   async loadProjects() {
     this.isLoading.set(true);
     try {
-      await this.projectService.loadProjects();
-      this.projects.set(this.projectService.getProjects()());
+      console.log('📊 Dashboard: Starting to load projects...');
+      const loadedProjects = await this.projectService.loadProjects();
+      console.log('📊 Dashboard: Projects loaded from service:', loadedProjects.length);
+      
+      const projectsFromSignal = this.projectService.getProjects()();
+      console.log('📊 Dashboard: Projects from signal:', projectsFromSignal.length, projectsFromSignal.map(p => ({ id: p.id, name: p.name })));
+      
+      this.projects.set(projectsFromSignal);
+      console.log('📊 Dashboard: Projects signal set, current value:', this.projects().length);
     } catch (error) {
       console.error('Error loading projects:', error);
       this.notificationService.showError('Failed to load projects');
@@ -302,26 +419,85 @@ export class DashboardComponent implements OnInit {
     }
   }
 
-  createProject() {
-    const dialogRef = this.dialog.open(ProjectDialogComponent, {
-      width: '500px',
-      data: { mode: 'create' }
-    });
-
-    dialogRef.afterClosed().subscribe(async (result) => {
-      if (result) {
-        try {
-          const project = await this.projectService.createProject(
-            result.name,
-            result.description
-          );
-          await this.loadProjects();
-          this.router.navigate(['/editor', project.id]);
-        } catch (error) {
-          console.error('Error creating project:', error);
-        }
+  async createProject() {
+    try {
+      // Get current user's organization
+      const user = this.authService.user();
+      if (!user?.organization_id) {
+        this.notificationService.showError('You must belong to an organization to create projects');
+        return;
       }
-    });
+
+      // Check if user can create project (plan limits)
+      const limitCheck = await this.planLimitsService.canCreateProject(user.organization_id);
+      
+      if (!limitCheck.canCreate) {
+        // Show upgrade dialog
+        const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+          width: '500px',
+          data: {
+            title: `Project Limit Reached (${limitCheck.current}/${limitCheck.max})`,
+            message: `Your ${limitCheck.tier.toUpperCase()} plan allows ${limitCheck.max} project(s). You currently have ${limitCheck.current}.\n\n${this.planLimitsService.getUpgradeMessage(limitCheck.tier, 'projects')}`,
+            confirmText: 'Upgrade Plan',
+            cancelText: 'Cancel'
+          }
+        });
+
+        confirmRef.afterClosed().subscribe((confirmed) => {
+          if (confirmed) {
+            // TODO: Redirect to upgrade page
+            this.notificationService.showInfo('Upgrade functionality coming soon!');
+          }
+        });
+        return;
+      }
+
+      // Show how many projects remaining
+      if (limitCheck.remaining <= 2 && limitCheck.max !== 999999) {
+        this.notificationService.showWarning(
+          `You can create ${limitCheck.remaining} more project(s) on your ${limitCheck.tier.toUpperCase()} plan`
+        );
+      }
+
+      // Open create project dialog
+      console.log('📝 Opening create project dialog...');
+      const dialogRef = this.dialog.open(ProjectDialogComponent, {
+        width: '500px',
+        data: { mode: 'create' }
+      });
+
+      dialogRef.afterClosed().subscribe(async (result) => {
+        console.log('📝 Dialog closed with result:', result);
+        if (result && result.name) {
+          try {
+            console.log('📝 Creating project with data:', { name: result.name, description: result.description });
+            const project = await this.projectService.createProject(
+              result.name,
+              result.description
+            );
+            console.log('✅ Project created successfully:', project.id);
+            await this.loadProjects();
+            this.notificationService.showSuccess(`Project "${project.name}" created successfully!`);
+            this.router.navigate(['/editor', project.id]);
+          } catch (error: any) {
+            console.error('❌ Error creating project:', error);
+            console.error('❌ Error details:', JSON.stringify(error, null, 2));
+            
+            // Check if error is due to limit
+            if (error.message?.includes('Project limit reached')) {
+              this.notificationService.showError('Project limit reached. Please upgrade your plan.');
+            } else {
+              this.notificationService.showError(`Failed to create project: ${error.message || 'Unknown error'}`);
+            }
+          }
+        } else {
+          console.log('📝 Dialog cancelled or invalid result:', result);
+        }
+      });
+    } catch (error: any) {
+      console.error('Error in createProject:', error);
+      this.notificationService.showError('Failed to check project limits');
+    }
   }
 
   editProject(project: Project) {
@@ -348,6 +524,7 @@ export class DashboardComponent implements OnInit {
   }
 
   deleteProject(project: Project) {
+    console.log('🗑️ Delete project requested:', project.id);
     const dialogRef = this.dialog.open(ConfirmDialogComponent, {
       width: '400px',
       data: {
@@ -360,21 +537,29 @@ export class DashboardComponent implements OnInit {
     });
 
     dialogRef.afterClosed().subscribe(async (confirmed) => {
+      console.log('🗑️ Delete confirmation:', confirmed);
       if (confirmed) {
         try {
+          console.log('🗑️ Deleting project:', project.id);
           await this.projectService.deleteProject(project.id);
+          console.log('✅ Project deleted, reloading projects list...');
           await this.loadProjects();
+          console.log('✅ Projects list reloaded');
           this.notificationService.showSuccess('Project deleted successfully');
         } catch (error) {
-          console.error('Error deleting project:', error);
+          console.error('❌ Error deleting project:', error);
           this.notificationService.showError('Failed to delete project');
         }
       }
     });
   }
 
-  openProject(project: Project) {
-    this.router.navigate(['/editor', project.id]);
+  openProject(project: Project, mode: 'editor' | 'view' = 'editor') {
+    if (mode === 'view') {
+      this.router.navigate(['/view-mode', project.id]);
+    } else {
+      this.router.navigate(['/editor', project.id]);
+    }
   }
 
   getTableCount(project: Project): number {

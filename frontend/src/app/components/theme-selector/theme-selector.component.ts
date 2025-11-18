@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, computed, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -398,7 +398,12 @@ import { Theme, ThemeColors } from '../../models/theme.model';
 export class ThemeSelectorComponent implements OnInit, OnDestroy {
   availableThemes: Theme[] = [];
   currentTheme: Theme | null = null;
-  isDarkMode = computed(() => this.themeService.isDarkMode());
+  
+  // Expose signal directly instead of computed to avoid initialization issues
+  get isDarkMode() {
+    // Return the signal itself, not its value
+    return this.themeService.isDarkMode;
+  }
   
   showCustomThemeDialog = false;
   customThemeForm: FormGroup;
@@ -418,11 +423,6 @@ export class ThemeSelectorComponent implements OnInit, OnDestroy {
       textPrimary: ['rgba(0, 0, 0, 0.87)'],
       textSecondary: ['rgba(0, 0, 0, 0.6)']
     });
-
-    // Subscribe to theme changes using effect in constructor
-    effect(() => {
-      this.currentTheme = this.themeService.currentTheme$();
-    });
   }
 
   ngOnInit() {
@@ -432,7 +432,7 @@ export class ThemeSelectorComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
-    // Cleanup if needed
+    // No cleanup needed
   }
 
   async selectTheme(theme: Theme) {

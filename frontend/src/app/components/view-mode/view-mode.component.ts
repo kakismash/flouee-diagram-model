@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, OnInit, signal, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -16,11 +17,16 @@ import { Table, Relationship, RelationshipDisplayColumn, ProjectSchema } from '.
 import { TableView } from '../../models/table-view.model';
 import { TableViewService } from '../../services/table-view.service';
 import { SchemaTranslationService, ValidationResult } from '../../services/schema-translation.service';
-import { DataSimulationService, TableData } from '../../services/data-simulation.service';
+import { DataSimulationService } from '../../services/data-simulation.service';
+import { SlaveDataService } from '../../services/slave-data.service';
 import { ProjectService } from '../../services/project.service';
 import { NotificationService } from '../../services/notification.service';
 import { ToolbarDataService } from '../../services/toolbar-data.service';
-import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.component';
+import { TableViewComponent } from '../table-view/table-view.component';
+import { DataChangeEvent } from '../../services/table-data.service';
+import { BadgeComponent } from '../design-system/badge/badge.component';
+import { EmptyStateComponent } from '../design-system/empty-state/empty-state.component';
+import { LoadingSpinnerComponent } from '../design-system/loading-spinner/loading-spinner.component';
 
 @Component({
   selector: 'app-view-mode',
@@ -37,46 +43,53 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
     MatSnackBarModule,
     MatDialogModule,
     MatTooltipModule,
-    TableViewComponent
+    TableViewComponent,
+    BadgeComponent,
+    EmptyStateComponent,
+    LoadingSpinnerComponent
   ],
   template: `
     <div class="view-mode-container">
       <!-- Content -->
       <div class="view-mode-content">
-        <div *ngIf="isLoading()" class="loading-container">
-          <mat-spinner></mat-spinner>
-          <p>Loading schema data...</p>
-        </div>
+        @if (isLoading()) {
+          <ds-loading-spinner
+            size="large"
+            message="Loading schema data..."
+            [center]="true">
+          </ds-loading-spinner>
+        }
 
-        <div *ngIf="!isLoading() && tables().length === 0" class="empty-state">
-          <mat-icon>table_chart</mat-icon>
-          <h3>No Tables Found</h3>
-          <p>This project doesn't have any tables defined yet.</p>
-          <button mat-raised-button color="primary" (click)="goBack()">
-            <mat-icon>edit</mat-icon>
-            Go to Editor
-          </button>
-        </div>
+        @if (!isLoading() && tables().length === 0) {
+        <ds-empty-state
+          icon="table_chart"
+          title="No Tables Found"
+          description="This project doesn't have any tables defined yet. Create your first table in the editor."
+          actionLabel="Go to Editor"
+          (actionClicked)="goBack()">
+        </ds-empty-state>
+        }
 
-        <div *ngIf="!isLoading() && tables().length > 0" class="tables-container">
+        @if (!isLoading() && tables().length > 0) {
+        <div class="tables-container">
           <mat-tab-group class="tables-tabs" animationDuration="300ms">
-            <mat-tab *ngFor="let table of tables(); trackBy: trackByTableId" [label]="table.name">
+            @for (table of tables(); track table.id) {
+            <mat-tab [label]="table.name">
               <ng-template mat-tab-label>
                 <div class="tab-label">
                   <mat-icon>table_chart</mat-icon>
                   <span>{{ table.name }}</span>
-                  <mat-chip class="tab-chip">{{ getTableData(table.id).length }} records</mat-chip>
+                  <ds-badge variant="info" size="small">-</ds-badge>
                 </div>
               </ng-template>
               
               <div class="tab-content">
                 <app-table-view 
                   [table]="table"
-                  [data]="getTableData(table.id)"
                   [relationships]="getTableRelationships(table.id)"
                   [relationshipDisplayColumns]="getRelationshipDisplayColumns(table.id)"
                   [allTables]="tables()"
-                  [allTableData]="tableData()"
+                  [allTableData]="{}"
                   [views]="getTableViews(table.id)"
                   [activeView]="getActiveView(table.id)"
                   (dataChanged)="onDataChanged($event)"
@@ -88,58 +101,10 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
                 </app-table-view>
               </div>
             </mat-tab>
+            }
           </mat-tab-group>
         </div>
-      </div>
-
-      <!-- Schema Info Panel -->
-      <div class="schema-info-panel" *ngIf="!isLoading() && tables().length > 0">
-        <mat-card class="schema-card">
-          <mat-card-header>
-            <mat-card-title>Schema Information</mat-card-title>
-          </mat-card-header>
-          <mat-card-content>
-            <div class="schema-stats">
-              <div class="stat-item">
-                <mat-icon>table_chart</mat-icon>
-                <div>
-                  <span class="stat-number">{{ tables().length }}</span>
-                  <span class="stat-label">Tables</span>
-                </div>
-              </div>
-              <div class="stat-item">
-                <mat-icon>link</mat-icon>
-                <div>
-                  <span class="stat-number">{{ relationships().length }}</span>
-                  <span class="stat-label">Relationships</span>
-                </div>
-              </div>
-              <div class="stat-item">
-                <mat-icon>data_object</mat-icon>
-                <div>
-                  <span class="stat-number">{{ getTotalRecords() }}</span>
-                  <span class="stat-label">Total Records</span>
-                </div>
-              </div>
-            </div>
-            
-            <div class="validation-info" *ngIf="validationResult()">
-              <h4>Validation Status</h4>
-              <div class="validation-errors" *ngIf="validationResult()!.errors.length > 0">
-                <h5>Errors:</h5>
-                <ul>
-                  <li *ngFor="let error of validationResult()!.errors">{{ error }}</li>
-                </ul>
-              </div>
-              <div class="validation-warnings" *ngIf="validationResult()!.warnings.length > 0">
-                <h5>Warnings:</h5>
-                <ul>
-                  <li *ngFor="let warning of validationResult()!.warnings">{{ warning }}</li>
-                </ul>
-              </div>
-            </div>
-          </mat-card-content>
-        </mat-card>
+        }
       </div>
     </div>
   `,
@@ -147,176 +112,122 @@ import { TableViewComponent, DataChangeEvent } from '../table-view/table-view.co
     .view-mode-container {
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 64px); // Subtract toolbar height
+      height: calc(100vh - 64px);
+      max-height: calc(100vh - 64px);
       background: var(--theme-background);
       color: var(--theme-text-primary);
+      overflow: hidden;
     }
 
-
+    /* Content Area */
     .view-mode-content {
       flex: 1;
+      min-height: 0;
+      max-height: 100%;
       display: flex;
       position: relative;
-    }
-
-    .loading-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 16px;
-    }
-
-    .loading-container p {
-      color: var(--theme-text-secondary);
-    }
-
-    .empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 16px;
-      text-align: center;
-    }
-
-    .empty-state h3 {
-      color: var(--theme-text-primary);
-    }
-
-    .empty-state p {
-      color: var(--theme-text-secondary);
-    }
-
-    .empty-state mat-icon {
-      font-size: 64px;
-      width: 64px;
-      height: 64px;
-      color: var(--theme-text-disabled);
+      overflow: hidden;
     }
 
     .tables-container {
       flex: 1;
+      min-height: 0;
+      max-height: 100%;
       display: flex;
       flex-direction: column;
+      width: 100%;
+      overflow: hidden;
     }
 
     .tables-tabs {
       flex: 1;
+      min-height: 0;
+      max-height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
 
     .tab-label {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--ds-spacing-xs, 4px);
       color: var(--theme-text-primary);
+      font-weight: 500;
+    }
+
+    .tab-label mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: var(--theme-primary);
     }
 
     .tab-label span {
       color: var(--theme-text-primary);
     }
 
-    .tab-chip {
-      font-size: 10px;
-      height: 20px;
-      background-color: var(--theme-surface-variant);
-      color: var(--theme-text-secondary);
-    }
-
     .tab-content {
-      padding: 24px;
+      padding: 0; /* Remove padding - table has its own margin */
       height: 100%;
-      overflow-y: auto;
+      max-height: 100%;
+      min-width: 0; /* Allow flexbox shrinking */
+      overflow: hidden; /* Let table handle its own scrolling */
+      display: block;
       background: var(--theme-background);
+      box-sizing: border-box;
     }
 
-    .schema-info-panel {
-      width: 300px;
-      background: var(--theme-background-paper);
-      border-left: 1px solid var(--theme-border);
-      overflow-y: auto;
+    /* Ensure mat-tab-group takes full height */
+    ::ng-deep .tables-tabs .mat-mdc-tab-group {
+      height: 100% !important;
+      max-height: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
     }
 
-    .schema-card {
-      margin: 16px;
-      background: var(--theme-card-background);
-      border: 1px solid var(--theme-card-border);
+    ::ng-deep .tables-tabs .mat-mdc-tab-body-wrapper {
+      flex: 1 !important;
+      min-height: 0 !important;
+      max-height: 100% !important;
+      overflow: hidden !important;
     }
 
-    .schema-stats {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      margin-bottom: 24px;
+    ::ng-deep .tables-tabs .mat-mdc-tab-body {
+      height: 100% !important;
+      max-height: 100% !important;
+      overflow: hidden !important;
     }
 
-    .stat-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .stat-item mat-icon {
-      color: var(--theme-primary);
-    }
-
-    .stat-number {
-      font-size: 24px;
-      font-weight: bold;
-      color: var(--theme-text-primary);
-    }
-
-    .stat-label {
-      font-size: 14px;
-      color: var(--theme-text-secondary);
-    }
-
-    .validation-info h4 {
-      margin: 0 0 12px 0;
-      color: var(--theme-text-primary);
-    }
-
-    .validation-info h5 {
-      margin: 8px 0 4px 0;
-      color: var(--theme-text-secondary);
-      font-size: 14px;
-    }
-
-    .validation-errors ul,
-    .validation-warnings ul {
-      margin: 0;
-      padding-left: 16px;
-    }
-
-    .validation-errors li {
-      color: var(--theme-error);
-      font-size: 12px;
-    }
-
-    .validation-warnings li {
-      color: var(--theme-warning);
-      font-size: 12px;
+    ::ng-deep .tables-tabs .mat-mdc-tab-body-content {
+      height: 100% !important;
+      max-height: 100% !important;
+      overflow: hidden !important;
+      display: flex !important;
+      flex-direction: column !important;
     }
   `]
 })
-export class ViewModeComponent implements OnInit, OnDestroy {
+export class ViewModeComponent implements OnInit {
   // Signals
   projectName = signal<string>('');
   tables = signal<Table[]>([]);
   relationships = signal<Relationship[]>([]);
   relationshipDisplayColumns = signal<RelationshipDisplayColumn[]>([]);
-  tableData = signal<TableData>({});
   validationResult = signal<ValidationResult | null>(null);
   isLoading = signal<boolean>(true);
   tableViews = signal<{ [tableId: string]: TableView[] }>({});
   activeViews = signal<{ [tableId: string]: string }>({});
 
+  private destroyRef = inject(DestroyRef);
+  private handleViewModeActionBound: EventListener;
+
   constructor(
     private projectService: ProjectService,
     private schemaTranslationService: SchemaTranslationService,
     private dataSimulationService: DataSimulationService,
+    private slaveDataService: SlaveDataService,
     private tableViewService: TableViewService,
     private notificationService: NotificationService,
     private toolbarDataService: ToolbarDataService,
@@ -324,21 +235,23 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     private dialog: MatDialog,
     private route: ActivatedRoute,
     private router: Router
-  ) {}
+  ) {
+    // Bind event handler once
+    this.handleViewModeActionBound = this.handleViewModeAction.bind(this) as EventListener;
+  }
 
   ngOnInit() {
     this.loadProjectData();
     
     // Listen for view mode actions from the shared toolbar
-    window.addEventListener('view-mode-action', this.handleViewModeAction.bind(this) as EventListener);
+    // Use DestroyRef for automatic cleanup
+    window.addEventListener('view-mode-action', this.handleViewModeActionBound);
+    this.destroyRef.onDestroy(() => {
+      window.removeEventListener('view-mode-action', this.handleViewModeActionBound);
+    });
     
     // Update shared toolbar with current data
     this.updateSharedToolbar();
-  }
-
-  ngOnDestroy() {
-    // Remove event listener
-    window.removeEventListener('view-mode-action', this.handleViewModeAction.bind(this) as EventListener);
   }
 
   private async loadProjectData() {
@@ -363,7 +276,20 @@ export class ViewModeComponent implements OnInit, OnDestroy {
       }
 
       this.projectName.set(project.name);
-      this.tables.set(project.schemaData.tables || []);
+      
+      // Debug: Verify tables and columns structure
+      const tables = project.schemaData.tables || [];
+      console.log('🔍 [ViewMode] Loaded project tables:', {
+        tableCount: tables.length,
+        tables: tables.map(t => ({
+          id: t.id,
+          name: t.name,
+          columnCount: t.columns?.length || 0,
+          columns: t.columns?.map(c => ({ id: c.id, name: c.name, type: c.type })) || []
+        }))
+      });
+      
+      this.tables.set(tables);
       this.relationships.set(project.schemaData.relationships || []);
       this.relationshipDisplayColumns.set(project.schemaData.relationshipDisplayColumns || []);
       
@@ -378,12 +304,8 @@ export class ViewModeComponent implements OnInit, OnDestroy {
         this.notificationService.showWarning(`Schema has ${validation.errors.length} errors`);
       }
 
-      // Initialize simulated data
-      const data = this.dataSimulationService.initializeData(project.schemaData);
-      this.tableData.set(data);
-
-      // Update shared toolbar with loaded data
-      this.updateSharedToolbar();
+      // Data will be loaded by each table-view component via realtime subscriptions
+      // No need to load all data upfront
 
       this.isLoading.set(false);
     } catch (error) {
@@ -393,12 +315,8 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     }
   }
 
-  getTableData(tableId: string): any[] {
-    const table = this.tables().find(t => t.id === tableId);
-    if (!table) return [];
-    
-    return this.tableData()[table.name] || [];
-  }
+  // Data is now managed by each table-view component via realtime subscriptions
+  // No need for getTableData() or refreshTableData() methods
 
   getTableRelationships(tableId: string): Relationship[] {
     return this.relationships().filter(rel => 
@@ -413,8 +331,9 @@ export class ViewModeComponent implements OnInit, OnDestroy {
   }
 
   getTotalRecords(): number {
-    const data = this.tableData();
-    return Object.values(data).reduce((total, records) => total + records.length, 0);
+    // Records are now managed by individual table-view components
+    // Return 0 as placeholder - can be enhanced later if needed
+    return 0;
   }
 
   onDataChanged(event: DataChangeEvent) {
@@ -434,37 +353,97 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     }
   }
 
-  private handleCreateRecord(event: DataChangeEvent) {
-    const tableData = this.tableData();
-    if (tableData[event.table]) {
-      tableData[event.table].push(event.data);
-      this.tableData.set({ ...tableData });
-      this.notificationService.showSuccess(`Record added to ${event.table}`);
-    }
-  }
+  private async handleCreateRecord(event: DataChangeEvent) {
+    // Realtime subscription will handle adding the record automatically
+    // We just need to insert it into the database
+    try {
+      const project = this.projectService.getCurrentProjectSync();
+      if (!project) return;
 
-  private handleUpdateRecord(event: DataChangeEvent) {
-    const tableData = this.tableData();
-    if (tableData[event.table]) {
-      const index = tableData[event.table].findIndex((record: any) => record.id === event.id);
-      if (index !== -1) {
-        tableData[event.table][index] = event.data;
-        this.tableData.set({ ...tableData });
-        this.notificationService.showSuccess(`Record updated in ${event.table}`);
+      const table = this.tables().find(t => t.name === event.table);
+      if (!table) {
+        this.notificationService.showError(`Table ${event.table} not found`);
+        return;
       }
+
+      // Insert into Slave database - realtime will update the table automatically
+      const result = await this.slaveDataService.insertRecord(
+        project.organizationId,
+        table,
+        event.data
+      );
+
+      if (result.success) {
+        const recordId = result.data?.id || 'new record';
+        this.notificationService.showSuccess(`✓ Record added successfully to ${event.table}`);
+      } else {
+        this.notificationService.showError(`Failed to add record: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Error creating record:', error);
+      this.notificationService.showError(`Error creating record: ${error.message}`);
     }
   }
 
-  private handleDeleteRecord(event: DataChangeEvent) {
-    console.log('🗑️ DEBUG VIEW MODE DELETE - handleDeleteRecord called:');
-    console.log('Event:', event);
-    console.log('Table:', event.table);
-    console.log('ID to delete:', event.id);
-    console.log('⚠️ SKIPPING deletion in ViewModeComponent - TableViewComponent already handles it');
-    
-    // Don't delete here - TableViewComponent already handles the deletion
-    // This prevents double deletion
-    this.notificationService.showSuccess(`Record deleted from ${event.table}`);
+  private async handleUpdateRecord(event: DataChangeEvent) {
+    // Realtime subscription will handle updating the record automatically
+    try {
+      const project = this.projectService.getCurrentProjectSync();
+      if (!project) return;
+
+      const table = this.tables().find(t => t.name === event.table);
+      if (!table || !event.id) {
+        this.notificationService.showError(`Table or record ID not found`);
+        return;
+      }
+
+      // Update in Slave database - realtime will update the table automatically
+      const result = await this.slaveDataService.updateRecord(
+        project.organizationId,
+        table,
+        event.id,
+        event.data
+      );
+
+      if (result.success) {
+        this.notificationService.showSuccess(`Record updated in ${event.table}`);
+      } else {
+        this.notificationService.showError(`Failed to update record: ${result.error}`);
+      }
+    } catch (error: any) {
+      console.error('Error updating record:', error);
+      this.notificationService.showError(`Error updating record: ${error.message}`);
+    }
+  }
+
+  private async handleDeleteRecord(event: DataChangeEvent) {
+    // Realtime subscription will handle removing the record automatically
+    try {
+      const project = this.projectService.getCurrentProjectSync();
+      if (!project) return;
+
+      const table = this.tables().find(t => t.name === event.table);
+      if (!table || !event.id) {
+        this.notificationService.showError(`Table or record ID not found`);
+        return;
+      }
+
+      // Delete from Slave database - realtime will update the table automatically
+      const result = await this.slaveDataService.deleteRecord(
+        project.organizationId,
+        table,
+        event.id
+      );
+
+      if (result.success) {
+        this.notificationService.showSuccess(`Record deleted from ${event.table}`);
+      } else {
+        this.notificationService.showError(`Failed to delete record: ${result.error}`);
+      }
+    } catch (error: any) {
+      console.error('Error deleting record:', error);
+      this.notificationService.showError(`Error deleting record: ${error.message}`);
+    }
   }
 
   private handleSchemaUpdate(event: DataChangeEvent) {
@@ -496,7 +475,10 @@ export class ViewModeComponent implements OnInit, OnDestroy {
     this.toolbarDataService.updateData({
       tableCount: this.tables().length,
       relationshipCount: this.relationships().length,
-      isValid: this.validationResult()?.isValid ?? true
+      totalRecords: this.getTotalRecords(),
+      isValid: this.validationResult()?.isValid ?? true,
+      errors: this.validationResult()?.errors.length ?? 0,
+      warnings: this.validationResult()?.warnings.length ?? 0
     });
   }
 

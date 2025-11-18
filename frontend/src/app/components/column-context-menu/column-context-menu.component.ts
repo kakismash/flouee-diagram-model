@@ -78,6 +78,15 @@ export interface ColumnContextMenuData {
         <mat-icon>info</mat-icon>
         <span>Colors only available for referenced columns</span>
       </div>
+      
+      <mat-divider></mat-divider>
+      
+      <div class="column-actions">
+        <button mat-menu-item (click)="onHideColumn()" class="hide-column-btn">
+          <mat-icon>visibility_off</mat-icon>
+          <span>Hide Column</span>
+        </button>
+      </div>
     </mat-menu>
   `,
   styles: [`
@@ -182,6 +191,22 @@ export interface ColumnContextMenuData {
       font-style: italic;
     }
 
+    .column-actions {
+      padding: 8px 0;
+    }
+
+    .hide-column-btn {
+      color: var(--theme-text-primary);
+    }
+
+    .hide-column-btn:hover {
+      background-color: var(--theme-hover);
+    }
+
+    .hide-column-btn mat-icon {
+      color: var(--theme-warning);
+    }
+
     ::ng-deep .mat-mdc-menu-panel {
       background: var(--theme-surface) !important;
       border: 1px solid var(--theme-border);
@@ -207,6 +232,7 @@ export class ColumnContextMenuComponent {
 
   @Output() colorSelected = new EventEmitter<{ columnId: string; color: ColumnColor | null }>();
   @Output() rightClick = new EventEmitter<MouseEvent>();
+  @Output() hideColumn = new EventEmitter<{ columnId: string; columnName: string }>();
 
   availableColors = signal<ColumnColor[]>([
     { name: 'Blue', value: 'blue', borderColor: '#1976d2', backgroundColor: '#e3f2fd' },
@@ -242,6 +268,13 @@ export class ColumnContextMenuComponent {
 
   clearColor() {
     this.colorSelected.emit({ columnId: this.data.columnId, color: null });
+  }
+
+  onHideColumn() {
+    this.hideColumn.emit({ 
+      columnId: this.data.columnId, 
+      columnName: this.data.columnName 
+    });
   }
 
   isColorSelected(color: ColumnColor): boolean {

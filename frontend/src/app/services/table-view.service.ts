@@ -12,7 +12,7 @@ export class TableViewService {
   constructor() { }
 
   /**
-   * Crea una nueva vista para una tabla
+   * Creates a new view for a table
    */
   createView(
     table: Table, 
@@ -36,7 +36,7 @@ export class TableViewService {
   }
 
   /**
-   * Crea la vista por defecto para una tabla
+   * Creates the default view for a table
    */
   createDefaultView(
     table: Table, 
@@ -58,7 +58,7 @@ export class TableViewService {
   }
 
   /**
-   * Crea configuraciones de columna por defecto
+   * Creates default column configurations
    */
   private createDefaultColumnSettings(
     table: Table, 
@@ -117,14 +117,14 @@ export class TableViewService {
   }
 
   /**
-   * Aplica una vista a una tabla
+   * Applies a view to a table
    */
   applyView(table: Table, view: TableView): TableColumn[] {
     if (!view.columnSettings) {
       return table.columns;
     }
 
-    // Filtrar y ordenar columnas según la vista
+    // Filter and sort columns according to the view
     const visibleColumns = table.columns
       .filter(col => {
         const setting = view.columnSettings.find(s => s.columnId === col.id);
@@ -142,14 +142,14 @@ export class TableViewService {
   }
 
   /**
-   * Obtiene las vistas de una tabla
+   * Gets the views for a table
    */
   getTableViews(tableId: string, allViews: { [tableId: string]: TableView[] }): TableView[] {
     return allViews[tableId] || [];
   }
 
   /**
-   * Establece la vista activa para una tabla
+   * Sets the active view for a table
    */
   setActiveView(tableId: string, viewId: string): void {
     const currentViews = this.activeViews();
@@ -160,7 +160,7 @@ export class TableViewService {
   }
 
   /**
-   * Obtiene la vista activa para una tabla
+   * Gets the active view for a table
    */
   getActiveView(tableId: string): string | null {
     return this.activeViews()[tableId] || null;
@@ -199,14 +199,14 @@ export class TableViewService {
   }
 
   /**
-   * Valida si una vista es válida
+   * Validates if a view is valid
    */
   validateView(view: TableView, table: Table): boolean {
     if (!view.name || !view.tableId) {
       return false;
     }
 
-    // Verificar que todas las columnas de la vista existan en la tabla
+    // Verify that all columns in the view exist in the table
     const tableColumnIds = table.columns.map(col => col.id);
     const invalidColumns = view.columnSettings?.filter(setting => 
       !tableColumnIds.includes(setting.columnId)
@@ -216,7 +216,68 @@ export class TableViewService {
   }
 
   /**
-   * Genera un ID único
+   * Applies a view to the table - returns regular columns and relationship columns
+   */
+  applyViewToTable(table: Table, view: TableView): {
+    regularColumns: TableColumn[];
+    relationshipColumns: any[];
+  } {
+    if (!table || !table.columns) {
+      return { regularColumns: [], relationshipColumns: [] };
+    }
+
+    // Apply regular columns from view
+    const visibleSettings = view.columnSettings
+      .filter(s => s.isVisible && !this.isRelationshipColumnSetting(s))
+      .sort((a, b) => a.order - b.order);
+    
+    let regularColumns = visibleSettings
+      .map(setting => table.columns.find(col => col.id === setting.columnId))
+      .filter(col => col !== undefined) as TableColumn[];
+    
+    // Handle missing columns - if view doesn't include all table columns, add them
+    const missingColumns = table.columns.filter(col => 
+      !regularColumns.some(rc => rc.id === col.id)
+    );
+    
+    if (missingColumns.length > 0) {
+      // Add missing columns at the end to ensure all columns are visible
+      regularColumns.push(...missingColumns);
+    }
+    
+    // Apply relationship columns from view
+    const relationshipColumns = view.columnSettings
+      .filter(s => s.isVisible && this.isRelationshipColumnSetting(s));
+    
+    return { regularColumns, relationshipColumns };
+  }
+
+  /**
+   * Applies default columns (all columns) when no view is active
+   */
+  getDefaultColumns(table: Table): {
+    regularColumns: TableColumn[];
+    relationshipColumns: any[];
+  } {
+    if (!table || !table.columns) {
+      return { regularColumns: [], relationshipColumns: [] };
+    }
+
+    return {
+      regularColumns: [...table.columns],
+      relationshipColumns: []
+    };
+  }
+
+  /**
+   * Check if a column setting is a relationship column
+   */
+  isRelationshipColumnSetting(setting: any): boolean {
+    return !!(setting as any).isRelationship || (setting.columnId && setting.columnId.startsWith('rel_'));
+  }
+
+  /**
+   * Generates a unique ID
    */
   private generateId(): string {
     return 'view_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();

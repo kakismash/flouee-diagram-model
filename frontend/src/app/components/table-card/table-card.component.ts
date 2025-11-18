@@ -53,7 +53,8 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
           <div class="columns-container" *ngIf="table.columns.length > 0">
             <div class="column-item" 
                  *ngFor="let column of getVisibleColumns(); let i = index"
-                 [class.primary-key]="column.isPrimaryKey">
+                 [class.primary-key]="column.isPrimaryKey"
+                 [attr.data-column-id]="column.id">
               <div class="column-main">
                 <div class="column-name">{{ column.name }}</div>
                 <div class="column-type" [class]="getTypeClass(column.type)">{{ getShortType(column.type) }}</div>
@@ -86,8 +87,11 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
               </div>
             </div>
             
-            <div *ngIf="table.columns.length > maxVisibleColumns" class="more-indicator">
-              <span>+{{ table.columns.length - maxVisibleColumns }} more</span>
+            <div *ngIf="getUserColumns().length > maxVisibleColumns" 
+                 class="more-indicator"
+                 (click)="toggleExpanded()">
+              <span *ngIf="!isExpanded">+{{ getUserColumns().length - getVisibleColumns().length }} more</span>
+              <span *ngIf="isExpanded">Show less</span>
             </div>
           </div>
           
@@ -355,9 +359,11 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
     }
     
         .columns-container {
-          max-height: 200px;
+          max-height: 500px; /* ✅ Increased height to show more columns */
           overflow-y: auto;
           overflow-x: visible;
+          /* ✅ Dynamic height based on content */
+          min-height: fit-content;
         }
     
         .column-item {
@@ -612,6 +618,13 @@ import { RelationshipColumnDialogComponent, RelationshipColumnDialogData } from 
       font-size: 12px;
       color: var(--theme-text-secondary);
       font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    
+    .more-indicator:hover {
+      background: var(--theme-hover);
+      color: var(--theme-text-primary);
     }
     
     .empty-state {
@@ -674,7 +687,8 @@ export class TableCardComponent implements OnInit {
   isDragging = false;
   private initialPosition = {x: 0, y: 0};
   private dragStart = {x: 0, y: 0};
-  maxVisibleColumns = 4;
+  maxVisibleColumns = 10; // ✅ Show more columns by default
+  isExpanded = false; // ✅ Track if columns are expanded
   
   constructor(
     private tableHelper: TableHelperService,
@@ -685,10 +699,20 @@ export class TableCardComponent implements OnInit {
     this.initialPosition = {x: this.x, y: this.y};
   }
   
-  getVisibleColumns(): TableColumn[] {
+  getUserColumns(): TableColumn[] {
     // Only show user-created columns (hide system generated like 'id' and FKs)
-    const userColumns = this.tableHelper.getUserColumns(this.table);
-    return userColumns.slice(0, this.maxVisibleColumns);
+    return this.tableHelper.getUserColumns(this.table);
+  }
+
+  getVisibleColumns(): TableColumn[] {
+    // ✅ Show all columns when expanded, otherwise limit
+    const userColumns = this.getUserColumns();
+    if (this.isExpanded) {
+      return userColumns; // Show all when expanded
+    }
+    return userColumns.length > this.maxVisibleColumns 
+      ? userColumns.slice(0, this.maxVisibleColumns)
+      : userColumns;
   }
 
       getShortType(type: string): string {
@@ -845,6 +869,10 @@ export class TableCardComponent implements OnInit {
   getSourceTableName(sourceTableId: string): string {
     const sourceTable = this.allTables.find(t => t.id === sourceTableId);
     return sourceTable ? sourceTable.name : 'Unknown';
+  }
+
+  toggleExpanded() {
+    this.isExpanded = !this.isExpanded;
   }
 
   onEditRelationshipColumn(event: Event, displayColumn: RelationshipDisplayColumn) {

@@ -1,45 +1,63 @@
-import { Component, OnInit, OnDestroy, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { NotificationService, Notification } from '../../services/notification.service';
 
 @Component({
   selector: 'app-notification',
   standalone: true,
-  imports: [CommonModule, MatIconModule, MatButtonModule],
+  imports: [CommonModule, MatIconModule, MatButtonModule, MatProgressSpinnerModule],
   template: `
     <div class="notification-container">
-      <div 
-        *ngFor="let notification of notifications; trackBy: trackByNotificationId"
-        class="notification"
-        [class]="'notification-' + notification.type">
-        
-        <div class="notification-content">
-          <div class="notification-icon">
-            <mat-icon *ngIf="notification.type === 'success'">check_circle</mat-icon>
-            <mat-icon *ngIf="notification.type === 'error'">error_outline</mat-icon>
-            <mat-icon *ngIf="notification.type === 'warning'">warning</mat-icon>
-            <mat-icon *ngIf="notification.type === 'info'">info</mat-icon>
+      @for (notification of notifications(); track notification.id) {
+        <div 
+          class="notification"
+          [class]="'notification-' + notification.type"
+          [attr.data-notification-id]="notification.id">
+          
+          <div class="notification-content">
+            <div class="notification-icon">
+              @if (notification.type === 'success') {
+                <mat-icon>check_circle</mat-icon>
+              }
+              @if (notification.type === 'error') {
+                <mat-icon>error_outline</mat-icon>
+              }
+              @if (notification.type === 'warning') {
+                <mat-icon>warning</mat-icon>
+              }
+              @if (notification.type === 'info') {
+                <mat-icon>info</mat-icon>
+              }
+              @if (notification.type === 'loading') {
+                <mat-spinner diameter="20"></mat-spinner>
+              }
+            </div>
+            
+            @if (notification.message) {
+              <div class="notification-message">
+                {{ notification.message }}
+              </div>
+            }
+            
+            <button 
+              mat-icon-button 
+              class="notification-close"
+              (click)="removeNotification(notification.id)"
+              [attr.aria-label]="'Close notification'">
+              <mat-icon>close</mat-icon>
+            </button>
           </div>
           
-          <div class="notification-message" *ngIf="notification.message">
-            {{ notification.message }}
-          </div>
-          
-          <button 
-            mat-icon-button 
-            class="notification-close"
-            (click)="removeNotification(notification.id)"
-            [attr.aria-label]="'Close notification'">
-            <mat-icon>close</mat-icon>
-          </button>
+          @if (notification.duration && notification.duration > 0) {
+            <div class="notification-progress">
+              <div class="progress-bar" [style.animation-duration]="notification.duration + 'ms'"></div>
+            </div>
+          }
         </div>
-        
-        <div class="notification-progress" *ngIf="notification.duration && notification.duration > 0">
-          <div class="progress-bar" [style.animation-duration]="notification.duration + 'ms'"></div>
-        </div>
-      </div>
+      }
     </div>
   `,
   styles: [`
@@ -182,6 +200,26 @@ import { NotificationService, Notification } from '../../services/notification.s
       background: #2196f3;
     }
     
+    /* Loading notification */
+    .notification-loading {
+      border-left: 4px solid #2196f3;
+      background: #e3f2fd;
+    }
+    
+    .notification-loading .notification-icon {
+      color: #2196f3;
+    }
+    
+    .notification-loading .notification-icon mat-spinner {
+      width: 20px;
+      height: 20px;
+    }
+    
+    .notification-loading .notification-icon ::ng-deep .mdc-circular-progress__determinate-circle,
+    .notification-loading .notification-icon ::ng-deep .mdc-circular-progress__indeterminate-circle-graphic {
+      stroke: #2196f3;
+    }
+    
     /* Animations */
     @keyframes slideIn {
       from {
@@ -216,29 +254,24 @@ import { NotificationService, Notification } from '../../services/notification.s
   animations: []
 })
 export class NotificationComponent implements OnInit, OnDestroy {
-  notifications: Notification[] = [];
+  constructor(
+    private notificationService: NotificationService
+  ) {}
 
-  constructor(private notificationService: NotificationService) {
-    // Use effect to react to signal changes
-    effect(() => {
-      this.notifications = this.notificationService.getNotifications()();
-    });
+  // Use getter to safely access the signal after constructor
+  get notifications() {
+    return this.notificationService.getNotifications();
   }
 
   ngOnInit(): void {
-    // Initial load
-    this.notifications = this.notificationService.getNotifications()();
+    // Component is ready, signal will update automatically
   }
 
   ngOnDestroy(): void {
-    // Cleanup if needed
+    // No cleanup needed - signal is managed by service
   }
 
   removeNotification(id: string): void {
     this.notificationService.removeNotification(id);
-  }
-
-  trackByNotificationId(index: number, notification: Notification): string {
-    return notification.id;
   }
 }

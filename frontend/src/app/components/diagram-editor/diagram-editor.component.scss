@@ -237,6 +237,77 @@
   background-color: rgba(0, 0, 0, 0.5) !important;
 }
 
+/* Many-to-Many Relationship Indicator */
+.many-to-many-indicator {
+  position: absolute;
+  z-index: 10;
+  pointer-events: auto;
+  
+  .mm-relationship-card {
+    background: var(--theme-surface);
+    border: 2px solid var(--theme-primary);
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 200px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(10px);
+    
+    .mm-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      
+      .mm-title {
+        font-weight: 600;
+        color: var(--theme-primary);
+        font-size: 14px;
+      }
+      
+      .mm-delete-btn {
+        width: 24px;
+        height: 24px;
+        line-height: 24px;
+        
+        mat-icon {
+          font-size: 16px;
+          color: var(--theme-error);
+        }
+        
+        &:hover {
+          background-color: var(--theme-error-container);
+        }
+      }
+    }
+    
+    .mm-content {
+      .mm-table-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        
+        .mm-table-name {
+          font-weight: 500;
+          color: var(--theme-text-primary);
+          font-size: 13px;
+        }
+        
+        .mm-arrow {
+          font-size: 16px;
+          color: var(--theme-primary);
+        }
+      }
+      
+      .mm-description {
+        font-size: 11px;
+        color: var(--theme-text-secondary);
+        font-style: italic;
+      }
+    }
+  }
+}
+
 /* Dark theme specific modal adjustments */
 ::ng-deep .dark-theme .mat-mdc-dialog-container {
   background-color: var(--theme-background) !important;

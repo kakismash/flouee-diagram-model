@@ -18,12 +18,12 @@ export class SmartDataGeneratorService {
   }
 
   /**
-   * Genera datos inteligentes basados en el contexto de tabla y campo
+   * Generates intelligent data based on table and field context
    */
   generateSmartData(context: TableContext): any {
     const { tableName, columnName, columnType, index } = context;
     
-    // Combinar nombre de tabla y campo para mejor contexto
+    // Combine table and field name for better context
     const fullContext = `${tableName}_${columnName}`.toLowerCase();
     
     switch (columnType.toLowerCase()) {
@@ -52,36 +52,36 @@ export class SmartDataGeneratorService {
   }
 
   private generateSmartString(context: string, columnName: string, index: number): string {
-    // Usar el contexto completo para mejor generación
+    // Use full context for better generation
     const lowerContext = context.toLowerCase();
     const lowerColumn = columnName.toLowerCase();
 
-    // Tabla de usuarios
+    // Users table
     if (lowerContext.includes('user') || lowerContext.includes('customer') || lowerContext.includes('person')) {
       return this.generateUserData(lowerColumn, index);
     }
     
-    // Tabla de productos
+    // Products table
     if (lowerContext.includes('product') || lowerContext.includes('item') || lowerContext.includes('goods')) {
       return this.generateProductData(lowerColumn, index);
     }
     
-    // Tabla de órdenes
+    // Orders table
     if (lowerContext.includes('order') || lowerContext.includes('purchase') || lowerContext.includes('transaction')) {
       return this.generateOrderData(lowerColumn, index);
     }
     
-    // Tabla de categorías
+    // Categories table
     if (lowerContext.includes('category') || lowerContext.includes('type') || lowerContext.includes('class')) {
       return this.generateCategoryData(lowerColumn, index);
     }
     
-    // Tabla de roles/permisos
+    // Roles/permissions table
     if (lowerContext.includes('role') || lowerContext.includes('permission') || lowerContext.includes('access')) {
       return this.generateRoleData(lowerColumn, index);
     }
     
-    // Campos específicos por nombre
+    // Specific fields by name
     return this.generateByColumnName(lowerColumn, index);
   }
 

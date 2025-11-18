@@ -44,7 +44,7 @@ export class AuthInterceptor implements HttpInterceptor {
       return req.clone({
         setHeaders: {
           'Authorization': `Bearer ${token}`,
-          'apikey': token, // Supabase también necesita esto
+          'apikey': token, // Supabase also needs this
           ...(user?.organization_id && { 'X-Organization-ID': user.organization_id })
         }
       });

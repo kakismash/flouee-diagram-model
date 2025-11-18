@@ -6,11 +6,13 @@ export interface Tenant {
   updatedAt: Date;
 }
 
+import { UserRole } from './user-role.model';
+
 export interface TenantUser {
   id: string;
   tenantId: string;
   userId: string;
-  role: 'owner' | 'admin' | 'member';
+  role: UserRole;
   createdAt: Date;
 }
 

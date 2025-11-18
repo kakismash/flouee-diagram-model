@@ -125,6 +125,16 @@ export interface ModernInputConfig {
       max-width: 100%;
       position: relative;
       display: inline-block;
+      box-sizing: border-box;
+    }
+
+    /* When used in table cells, constrain width */
+    :host-context(td[mat-cell]) .modern-input-container,
+    :host-context(.cell-input) .modern-input-container {
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      display: block !important;
     }
 
     /* Size variants */
@@ -308,6 +318,7 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
   @Output() escape = new EventEmitter<void>();
   @Output() focus = new EventEmitter<void>();
   @Output() blur = new EventEmitter<void>();
+  @Output() tab = new EventEmitter<void>();
 
   internalValue = signal<string>('');
   showPassword = signal<boolean>(false);
@@ -320,8 +331,12 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
     this.internalValue.set(this.value);
   }
 
-  ngOnChanges() {
-    this.internalValue.set(this.value);
+  ngOnChanges(changes: any) {
+    // Only update if value actually changed from outside (not from user input)
+    // This prevents overwriting user input while typing
+    if (changes.value && changes.value.currentValue !== this.internalValue()) {
+      this.internalValue.set(this.value || '');
+    }
   }
 
   getSizeClass(): string {
@@ -444,6 +459,7 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
 
   onBlur(): void {
     this.onTouched();
+    // Emit blur immediately - the parent component will handle the delay if needed
     this.blur.emit();
   }
 
@@ -457,6 +473,15 @@ export class ModernInputComponent implements ControlValueAccessor, OnInit, OnCha
 
   onEscape(): void {
     this.escape.emit();
+  }
+
+  onTab(event: Event): void {
+    // Prevent default tab behavior
+    if (event instanceof KeyboardEvent) {
+      event.preventDefault();
+    }
+    // Emit tab event to parent
+    this.tab.emit();
   }
 
   clearValue(): void {
