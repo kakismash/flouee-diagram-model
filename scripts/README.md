@@ -1,104 +1,151 @@
-# 🔍 Verification Scripts
+# Scripts Directory
 
-This folder contains SQL scripts to verify that the multi-tenant implementation has been completed correctly.
+This directory contains utility scripts for managing the Flouee Diagram Model system.
 
----
+## 📋 Scripts Overview
 
-## 📄 Files
+All scripts are registered in `package.json` and can be run using npm commands.
 
-### `verify-master-setup.sql`
+### Database & Migration Scripts
 
-**Purpose**: Verify that the Master project (Control Plane) is correctly configured.
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `apply-migrations.js` | `npm run migrate` | Apply database migrations from `supabase/migrations/` |
+| `apply-project-schema-to-slave.js` | `npm run apply-to-slave` | Apply a project's schema to the Slave database |
 
-**How to use**:
-1. Go to: https://app.supabase.com/project/cwbywxaafncyplgsrblw/editor
-2. SQL Editor > New Query
-3. Copy and paste the content of this file
-4. Execute (Run)
+### Slave Management Scripts
 
-**What it verifies**:
-- ✅ 5 tables created (organizations, deployment_configs, etc.)
-- ✅ 4 helper functions
-- ✅ RLS enabled on all tables
-- ✅ RLS policies created
-- ✅ Triggers working
-- ✅ Test organization created
-- ✅ Deployment config registered
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `init-slave-from-zero.js` | `npm run slave:init` | Initialize a new Slave project from scratch (creates exec_sql and auth helpers) |
+| `reset-and-init-slave.js` | `npm run slave:reset` | Reset an existing Slave (drops schemas, recreates, optionally applies projects) |
+| `reset-and-init-slave.js --apply-projects` | `npm run slave:reset-apply` | Reset Slave and re-apply all projects |
+| `init-fresh-system.js` | `npm run slave:init-fresh` | Complete fresh system initialization with test data |
+| `clone-slave-project.js` | `npm run slave:clone` | Clone Slave project template (interactive wizard) |
 
-**Expected result**: All tests should show `✅ PASS`
+### Testing Scripts
 
----
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `deep-test-schema-system.js` | `npm run test:deep` | Deep testing of the schema system |
+| `test-e2e-schema-changes.js` | `npm run test:e2e` | End-to-end testing of schema changes |
+| `verify-rbac-setup.js` | `npm run verify:rbac` | Verify RBAC (Role-Based Access Control) setup |
 
-### `verify-slave-setup.sql`
+### Utility Scripts
 
-**Purpose**: Verify that the Slave project (Data Plane) is correctly configured.
-
-**⚠️ IMPORTANT**: Execute in the SLAVE project, NOT in Master
-
-**How to use**:
-1. Go to the Slave project in Supabase Dashboard
-2. SQL Editor > New Query
-3. Copy and paste the content of this file
-4. Execute (Run)
-
-**What it verifies**:
-- ✅ 6 tables created (projects, tables, columns, etc.)
-- ✅ auth.organization_id() and auth.user_id() functions
-- ✅ RLS enabled on all tables
-- ✅ 20+ RLS policies created
-- ✅ Auto-populate triggers
-- ✅ organization_id columns in all tables
-- ✅ Indexes created
-
-**Expected result**: All tests should show `✅ PASS`
+| Script | Command | Purpose |
+|--------|---------|---------|
+| `sql-to-clipboard.js` | `npm run setup-sql` | SQL utility for copying SQL to clipboard |
+| `delete-project-with-cleanup.js` | `npm run delete-project` | Delete a project with proper cleanup |
+| `reconcile-all-projects.js` | `npm run reconcile` | Reconcile all projects between Master and Slave |
 
 ---
 
-## 🚨 If Any Test Fails
+## 🚀 Quick Start
 
-1. **Copy the complete script output**
-2. **Identify which test failed**
-3. **Review the error message**
-4. **Consult with the development team**
+### Initialize a New Slave Project
 
----
+```bash
+# Initialize a new Slave from zero
+npm run slave:init
 
-## 📊 Result Interpretation
-
-### Test States:
-
-- **✅ PASS**: The test passed correctly
-- **❌ FAIL**: The test failed, review implementation
-- **⚠️ WARNING**: Not critical, but requires attention
-
-### Example of Successful Output:
-
+# Or specify a project reference
+node scripts/init-slave-from-zero.js <project-ref>
 ```
-test                          | status
-------------------------------|----------
-TEST 1: Tables Created        | ✅ PASS
-TEST 2: Helper Functions      | ✅ PASS
-TEST 3: RLS Enabled          | ✅ PASS
-TEST 4: RLS Policies         | ✅ PASS
-TEST 5: Triggers             | ✅ PASS
-TEST 6: Test Organization    | ✅ PASS
-TEST 7: Deployment Config    | ✅ PASS
+
+### Reset an Existing Slave
+
+```bash
+# Reset Slave (drops schemas, recreates)
+npm run slave:reset
+
+# Reset and re-apply all projects
+npm run slave:reset-apply
+```
+
+### Apply Migrations
+
+```bash
+# Apply all pending migrations
+npm run migrate
+```
+
+### Testing
+
+```bash
+# Deep test the schema system
+npm run test:deep
+
+# E2E test schema changes
+npm run test:e2e
+
+# Verify RBAC setup
+npm run verify:rbac
 ```
 
 ---
 
-## 🔄 When to Execute
+## 📝 Script Details
 
-### Master:
-- ✅ After running migration `20250105_master_control_plane.sql`
-- ✅ After creating the test organization
-- ✅ After registering the Slave in deployment_configs
+### Init Scripts Comparison
 
-### Slave:
-- ✅ After running migration `20250105_slave_data_plane.sql`
-- ✅ After configuring the shared JWT Secret
-- ✅ Before attempting to create test data
+#### `init-slave-from-zero.js`
+- **Purpose:** Initialize a NEW Slave project
+- **What it does:**
+  - Creates `exec_sql` function
+  - Creates auth helper functions (`current_organization_id`, `current_user_id`, `current_user_role`)
+  - Verifies functions exist
+- **Use Case:** Setting up a brand new Slave project
+
+#### `reset-and-init-slave.js`
+- **Purpose:** Reset an EXISTING Slave project
+- **What it does:**
+  - Drops ALL organization schemas
+  - Verifies functions exist (doesn't create them - assumes they already exist)
+  - Recreates fresh schemas for all organizations
+  - Optionally re-applies projects from Master
+- **Use Case:** Resetting a Slave to clean state while keeping functions
+
+#### `init-fresh-system.js`
+- **Purpose:** Complete fresh system initialization with test data
+- **What it does:**
+  - Cleans all Slave schemas
+  - Sets up Slave with required functions
+  - Creates realistic test data
+  - Creates use case projects (E-commerce, CRM, etc.)
+  - Applies all schemas to Slave
+- **Use Case:** Development/testing - complete fresh start with sample data
 
 ---
 
-**See also**: `NEXT_STEPS.md` for the complete implementation guide
+## 🔧 Requirements
+
+All scripts require:
+- Node.js (ES modules)
+- Environment variables configured (`.env` file):
+  - `SUPABASE_URL` or `SUPABASE_MASTER_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_MASTER_SERVICE_ROLE_KEY`
+
+---
+
+## 📚 Related Documentation
+
+- **Script Review:** See `scripts/SCRIPT_REVIEW.md` for detailed analysis
+- **System Setup:** See `SYSTEM_READY.md` for system overview
+- **Migrations:** See `supabase/migrations/` for database migrations
+
+---
+
+## ⚠️ Notes
+
+- All scripts are idempotent (safe to run multiple times)
+- Scripts use the Master database to get Slave connection info from `deployment_configs` table
+- RPC functions are managed via migrations (see `supabase/migrations/20250120_create_read_table_data_rpc.sql`)
+
+---
+
+## 🔄 Script Maintenance
+
+For script review and cleanup, see `scripts/SCRIPT_REVIEW.md`.
+
+**Last Updated:** 2025-01-20
