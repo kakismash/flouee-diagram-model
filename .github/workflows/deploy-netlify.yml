@@ -87,11 +87,15 @@ jobs:
             exit 1
           fi
           
-          if [ -z "$NETLIFY_SITE_ID" ]; then
+          # Check if NETLIFY_SITE_ID is empty or only whitespace
+          # Trim whitespace and check if empty
+          NETLIFY_SITE_ID_TRIMMED=$(echo "$NETLIFY_SITE_ID" | xargs)
+          
+          if [ -z "$NETLIFY_SITE_ID_TRIMMED" ]; then
             echo "⚠️  NETLIFY_SITE_ID not set. Creating a new Netlify site..."
             echo "📝 Site name: flouee-diagram-model"
             
-            # Create a new site with JSON output
+            # Create a new site
             # First, verify Netlify CLI is working
             echo "🔍 Verifying Netlify CLI installation..."
             NETLIFY_VERSION=$(netlify --version 2>&1 || echo "unknown")
@@ -104,13 +108,13 @@ jobs:
             echo ""
             
             # Try to create site - Netlify CLI should read NETLIFY_AUTH_TOKEN from env
-            echo "🚀 Executing: netlify sites:create --name flouee-diagram-model --json"
+            echo "🚀 Executing: netlify sites:create --name flouee-diagram-model"
             echo "📝 Using NETLIFY_AUTH_TOKEN from environment..."
             echo ""
             
             # Capture both stdout and stderr, don't fail immediately
             set +e  # Don't exit on error immediately
-            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
+            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" 2>&1)
             EXIT_CODE=$?
             set -e  # Re-enable exit on error
             
@@ -123,19 +127,21 @@ jobs:
             echo ""
             
             if [ $EXIT_CODE -eq 0 ]; then
-              # Try to parse JSON output
-              if command -v jq &> /dev/null; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | jq -r '.site_id // .id // empty' 2>/dev/null)
+              # Extract site ID from output
+              # Netlify CLI output format: "Site created: https://xxxxx.netlify.app (xxxxx-xxxx-xxxx-xxxx-xxxxx)"
+              # Or: "Site created. Site ID: xxxxx-xxxx-xxxx-xxxx-xxxxx"
+              
+              # Try to extract from URL pattern
+              SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'https://[a-zA-Z0-9-]+\.netlify\.app' | sed 's|https://||' | sed 's|\.netlify\.app||' | head -1 || echo "")
+              
+              # Try to extract from "Site ID:" pattern
+              if [ -z "$SITE_ID" ]; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -i "site id" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
               fi
               
-              # Fallback: try grep if jq didn't work or SITE_ID is empty
+              # Try to extract from parentheses pattern: (xxxxx-xxxx-xxxx-xxxx-xxxxx)
               if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -o '"site_id"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/.*"site_id"[[:space:]]*:[[:space:]]*"\([^"]*\).*/\1/' || echo "")
-              fi
-              
-              # Another fallback: try different patterns
-              if [ -z "$SITE_ID" ]; then
-                SITE_ID=$(echo "$SITE_OUTPUT" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\).*/\1/' | head -1 || echo "")
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '\([a-f0-9-]+\)' | sed 's/[()]//g' | head -1 || echo "")
               fi
               
               # Last resort: extract any UUID-like string
@@ -143,33 +149,52 @@ jobs:
                 SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}' | head -1 || echo "")
               fi
               
+              # Try to extract site name from URL (sometimes the site name is the ID)
+              if [ -z "$SITE_ID" ]; then
+                SITE_ID=$(echo "$SITE_OUTPUT" | grep -oE 'netlify\.app/[^[:space:]]+' | sed 's|netlify\.app/||' | head -1 || echo "")
+              fi
+              
               if [ -z "$SITE_ID" ]; then
                 echo "❌ Failed to extract site ID from Netlify response"
-                echo "Netlify output:"
+                echo ""
+                echo "Netlify output was:"
                 echo "$SITE_OUTPUT"
                 echo ""
-                echo "Please check the Netlify output above and manually create a site, then add NETLIFY_SITE_ID to GitHub Secrets"
+                echo "Please manually extract the Site ID from the output above and update the NETLIFY_SITE_ID secret."
+                echo ""
+                echo "The Site ID is usually:"
+                echo "  - The subdomain in the URL (e.g., 'xxxxx' from 'https://xxxxx.netlify.app')"
+                echo "  - Or a UUID shown in the output"
                 exit 1
               fi
               
               echo "✅ New Netlify site created successfully!"
+              echo "📋 Site ID extracted: $SITE_ID"
               echo "📋 SITE_ID=$SITE_ID" >> $GITHUB_OUTPUT
               echo ""
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-              echo "🔑 IMPORTANT: Add this to GitHub Secrets"
+              echo "🔑 IMPORTANT: Update NETLIFY_SITE_ID in GitHub Secrets"
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "The NETLIFY_SITE_ID secret exists but is empty. Update it with:"
               echo ""
               echo "Secret Name: NETLIFY_SITE_ID"
               echo "Secret Value: $SITE_ID"
               echo ""
-              echo "Steps to add:"
+              echo "Steps to update:"
               echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
-              echo "2. Click 'New repository secret'"
-              echo "3. Name: NETLIFY_SITE_ID"
-              echo "4. Value: $SITE_ID"
-              echo "5. Click 'Add secret'"
+              echo "2. Find 'NETLIFY_SITE_ID' in the list"
+              echo "3. Click the pencil icon (✏️) to edit"
+              echo "4. Paste this value: $SITE_ID"
+              echo "5. Click 'Update secret'"
               echo ""
-              echo "After adding the secret, re-run this workflow for future deployments."
+              echo "Or if using GitHub Environment 'production':"
+              echo "1. Go to: https://github.com/${{ github.repository }}/settings/environments"
+              echo "2. Click on 'production' environment"
+              echo "3. Find 'NETLIFY_SITE_ID' in the secrets list"
+              echo "4. Click 'Update' and paste: $SITE_ID"
+              echo ""
+              echo "After updating, future deployments will use this site automatically."
               echo ""
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
               echo ""
@@ -209,7 +234,7 @@ jobs:
             fi
           else
             echo "✅ Using existing Netlify site: $NETLIFY_SITE_ID"
-            echo "📋 SITE_ID=$NETLIFY_SITE_ID" >> $GITHUB_OUTPUT
+            echo "📋 SITE_ID=$NETLIFY_SITE_ID_TRIMMED" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy to Netlify
