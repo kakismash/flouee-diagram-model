@@ -333,13 +333,12 @@ jobs:
           fi
 
       - name: Deploy to Netlify
-        working-directory: ./frontend
         uses: netlify/actions/cli@master
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ steps.netlify-site.outputs.SITE_ID || secrets.NETLIFY_SITE_ID }}
         with:
-          args: deploy --dir=dist/frontend/browser --prod --skip-build
+          args: deploy --dir=frontend/dist/frontend/browser --config=frontend/netlify.toml --prod
 
       - name: Netlify deployment summary
         if: success()
