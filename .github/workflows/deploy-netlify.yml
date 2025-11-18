@@ -92,21 +92,34 @@ jobs:
             echo "📝 Site name: flouee-diagram-model"
             
             # Create a new site with JSON output
-            # Use --auth flag to explicitly pass the token
+            # First, verify Netlify CLI is working
+            echo "🔍 Verifying Netlify CLI installation..."
+            NETLIFY_VERSION=$(netlify --version 2>&1 || echo "unknown")
+            echo "   Netlify CLI version: $NETLIFY_VERSION"
+            echo ""
+            
+            # Verify token format (should start with specific pattern)
+            TOKEN_PREFIX=$(echo "$NETLIFY_AUTH_TOKEN" | cut -c1-10)
+            echo "🔍 Token verification (first 10 chars): ${TOKEN_PREFIX}..."
+            echo ""
+            
+            # Try to create site - Netlify CLI should read NETLIFY_AUTH_TOKEN from env
             echo "🚀 Executing: netlify sites:create --name flouee-diagram-model --json"
-            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json --auth "$NETLIFY_AUTH_TOKEN" 2>&1)
+            echo "📝 Using NETLIFY_AUTH_TOKEN from environment..."
+            echo ""
+            
+            # Capture both stdout and stderr, don't fail immediately
+            set +e  # Don't exit on error immediately
+            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
             EXIT_CODE=$?
+            set -e  # Re-enable exit on error
             
-            # If that fails, try without --auth (CLI should read from env)
-            if [ $EXIT_CODE -ne 0 ]; then
-              echo "⚠️  First attempt failed, trying without --auth flag..."
-              SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
-              EXIT_CODE=$?
-            fi
-            
+            echo ""
             echo "📋 Netlify CLI exit code: $EXIT_CODE"
-            echo "📋 Netlify CLI output:"
+            echo "📋 Netlify CLI full output:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "$SITE_OUTPUT"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             
             if [ $EXIT_CODE -eq 0 ]; then
