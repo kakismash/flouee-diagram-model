@@ -38,6 +38,29 @@ yarn-error.log
 testem.log
 /typings
 
+# Environment files (contain secrets) - applies recursively to all subdirectories
+# Root level
+.env
+.env.local
+.env.*.local
+test.env
+*.env
+
+# Recursive patterns (covers nested projects like frontend/, supabase/, etc.)
+**/.env
+**/.env.local
+**/.env.*.local
+**/test.env
+**/*.env
+
+# Allow example files (templates)
+!.env.example
+!env.example
+!env.slave.example
+!**/.env.example
+!**/env.example
+!**/env.slave.example
+
 # System files
 .DS_Store
 Thumbs.db
