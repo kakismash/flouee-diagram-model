@@ -62,15 +62,51 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
+          # Verify NETLIFY_AUTH_TOKEN is set
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "❌ ERROR: NETLIFY_AUTH_TOKEN is not set!"
+            echo ""
+            echo "Please add NETLIFY_AUTH_TOKEN to GitHub Secrets:"
+            echo "1. Go to: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "2. Click 'New repository secret'"
+            echo "3. Name: NETLIFY_AUTH_TOKEN"
+            echo "4. Value: (get it from https://app.netlify.com/user/applications)"
+            echo ""
+            exit 1
+          fi
+          
           # Authenticate Netlify CLI
+          # Netlify CLI reads NETLIFY_AUTH_TOKEN from environment automatically
           export NETLIFY_AUTH_TOKEN="$NETLIFY_AUTH_TOKEN"
+          echo "✅ Netlify authentication token is set"
+          
+          # Verify token is not empty (basic check)
+          if [ ${#NETLIFY_AUTH_TOKEN} -lt 10 ]; then
+            echo "❌ ERROR: NETLIFY_AUTH_TOKEN appears to be invalid (too short)"
+            exit 1
+          fi
           
           if [ -z "$NETLIFY_SITE_ID" ]; then
             echo "⚠️  NETLIFY_SITE_ID not set. Creating a new Netlify site..."
+            echo "📝 Site name: flouee-diagram-model"
             
             # Create a new site with JSON output
-            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
+            # Use --auth flag to explicitly pass the token
+            echo "🚀 Executing: netlify sites:create --name flouee-diagram-model --json"
+            SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json --auth "$NETLIFY_AUTH_TOKEN" 2>&1)
             EXIT_CODE=$?
+            
+            # If that fails, try without --auth (CLI should read from env)
+            if [ $EXIT_CODE -ne 0 ]; then
+              echo "⚠️  First attempt failed, trying without --auth flag..."
+              SITE_OUTPUT=$(netlify sites:create --name "flouee-diagram-model" --json 2>&1)
+              EXIT_CODE=$?
+            fi
+            
+            echo "📋 Netlify CLI exit code: $EXIT_CODE"
+            echo "📋 Netlify CLI output:"
+            echo "$SITE_OUTPUT"
+            echo ""
             
             if [ $EXIT_CODE -eq 0 ]; then
               # Try to parse JSON output
@@ -125,13 +161,36 @@ jobs:
               echo ""
             else
               echo "❌ Failed to create Netlify site"
+              echo ""
               echo "Exit code: $EXIT_CODE"
-              echo "Netlify output:"
+              echo ""
+              echo "Netlify CLI output:"
               echo "$SITE_OUTPUT"
               echo ""
-              echo "Please check:"
-              echo "1. NETLIFY_AUTH_TOKEN is valid"
-              echo "2. You have permission to create sites in Netlify"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "🔍 Troubleshooting Steps:"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo ""
+              echo "1. Verify NETLIFY_AUTH_TOKEN is valid:"
+              echo "   - Go to: https://app.netlify.com/user/applications"
+              echo "   - Check if the token exists and is active"
+              echo "   - If not, create a new token and update GitHub Secrets"
+              echo ""
+              echo "2. Check token permissions:"
+              echo "   - The token must have permission to create sites"
+              echo "   - Verify your Netlify account has site creation enabled"
+              echo ""
+              echo "3. Try creating site manually:"
+              echo "   - Go to: https://app.netlify.com/"
+              echo "   - Click 'Add new site' → 'Import an existing project'"
+              echo "   - Choose 'Deploy manually'"
+              echo "   - Copy the Site ID and add it as NETLIFY_SITE_ID secret"
+              echo ""
+              echo "4. Check Netlify account limits:"
+              echo "   - Free accounts have limits on number of sites"
+              echo "   - Verify you haven't reached the limit"
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
               exit 1
             fi
           else
