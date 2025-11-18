@@ -332,13 +332,28 @@ jobs:
             echo "📋 SITE_ID=$NETLIFY_SITE_ID_TRIMMED" >> $GITHUB_OUTPUT
           fi
 
+      - name: Temporarily move root netlify.toml
+        run: |
+          if [ -f "netlify.toml" ]; then
+            mv netlify.toml netlify.toml.backup
+            echo "✅ Moved root netlify.toml to backup"
+          fi
+
       - name: Deploy to Netlify
         uses: netlify/actions/cli@master
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ steps.netlify-site.outputs.SITE_ID || secrets.NETLIFY_SITE_ID }}
         with:
-          args: deploy --dir=frontend/dist/frontend/browser --config=frontend/netlify.toml --prod
+          args: deploy --dir=frontend/dist/frontend/browser --prod
+
+      - name: Restore root netlify.toml
+        if: always()
+        run: |
+          if [ -f "netlify.toml.backup" ]; then
+            mv netlify.toml.backup netlify.toml
+            echo "✅ Restored root netlify.toml"
+          fi
 
       - name: Netlify deployment summary
         if: success()
