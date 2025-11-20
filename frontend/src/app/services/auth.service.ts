@@ -446,11 +446,15 @@ export class AuthService {
       console.log('Attempting to sign up:', email);
       this.updateAuthState({ isLoading: true, error: null });
 
+      // Use the current host's full URL for email confirmation redirect
+      // This ensures the confirmation link works regardless of where the app is deployed
+      const redirectUrl = `${window.location.origin}${window.location.pathname}`;
+      
       const { data, error } = await this.supabase.client.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: window.location.origin,
+          emailRedirectTo: redirectUrl,
           data: {
             organization_name: organizationName || 'Default Organization'
           }
