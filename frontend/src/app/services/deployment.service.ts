@@ -61,14 +61,24 @@ export class DeploymentService {
     try {
       console.log('🚀 Initializing deployment service for user:', userId);
 
-      // Get user's organizations from master
-      const { data: orgs, error: orgsError } = await this.masterClient
-        .rpc('get_user_organizations', { p_user_id: userId });
+      // Get user's organizations using Edge Function
+      const { data: { session } } = await this.masterClient.auth.getSession();
+      if (!session) {
+        throw new Error('No session available');
+      }
+
+      const { data: orgsData, error: orgsError } = await this.masterClient.functions.invoke('get-user-organizations', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
 
       if (orgsError) {
         console.error('Error fetching organizations:', orgsError);
         throw orgsError;
       }
+
+      const orgs = orgsData?.organizations || [];
 
       // IMPORTANT: Organization is OPTIONAL
       // User can work without organization (solo mode)
@@ -122,26 +132,30 @@ export class DeploymentService {
 
       console.log('✅ Organization context loaded:', organization.name, '(', organization.subscriptionTier, ')');
 
-      // Get deployment configuration
-      const { data: config, error: configError } = await this.masterClient
-        .rpc('get_deployment_config', { p_organization_id: selectedOrg.org_id });
+      // Get deployment configuration using Edge Function
+      const { data: configData, error: configError } = await this.masterClient.functions.invoke('initialize-slave-client', {
+        body: {
+          organizationId: selectedOrg.org_id
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
 
       if (configError) {
         console.error('Error fetching deployment config:', configError);
         throw configError;
       }
 
-      if (!config || config.length === 0) {
+      if (!configData?.success || !configData?.slaveClient) {
         throw new Error('Deployment configuration not found');
       }
 
-      const configData = config[0];
-      
-      // Access fields using correct naming (RPC returns snake_case)
-      const projectRef = configData.supabase_project_ref || configData.project_ref;
-      const projectUrl = configData.supabase_project_url || configData.project_url;
-      const anonKey = configData.supabase_anon_key || configData.anon_key;
-      const schemaName = configData.schema_name;
+      const slaveClient = configData.slaveClient;
+      const projectRef = slaveClient.projectRef;
+      const projectUrl = slaveClient.projectUrl;
+      const anonKey = slaveClient.anonKey;
+      const schemaName = slaveClient.schemaName;
 
       // Validate required fields
       if (!projectUrl || !anonKey) {
@@ -385,21 +399,34 @@ export class DeploymentService {
     try {
       console.log('🏢 Creating new organization:', orgName);
 
-      // Call RPC to create organization
-      const { data, error } = await this.masterClient
-        .rpc('create_organization', {
-          p_user_id: userId,
-          p_name: orgName,
-          p_slug: slug,
-          p_tier: tier
-        });
+      // Get session for Edge Function call
+      const { data: { session } } = await this.masterClient.auth.getSession();
+      if (!session) {
+        throw new Error('No session available');
+      }
+
+      // Call Edge Function to create organization
+      const { data, error } = await this.masterClient.functions.invoke('create-organization', {
+        body: {
+          organizationName: orgName,
+          slug: slug,
+          tier: tier
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
 
       if (error) {
         console.error('Error creating organization:', error);
         throw error;
       }
 
-      const newOrgId = data;
+      if (!data?.success || !data?.organization_id) {
+        throw new Error('Failed to create organization: invalid response');
+      }
+
+      const newOrgId = data.organization_id;
       console.log('✅ Organization created:', newOrgId);
 
       // Re-initialize with new organization

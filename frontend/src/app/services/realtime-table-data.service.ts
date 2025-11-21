@@ -48,20 +48,31 @@ export class RealtimeTableDataService implements OnDestroy {
       // Initialize slave client
       await this.slaveDataService.initializeSlaveClient(organizationId);
       
-      // Get deployment config to create our own client for realtime
+      // Get deployment config using Edge Function (secure, no service_role_key exposed)
       const masterClient = this.supabaseService.client;
-      const { data: configs, error } = await masterClient
-        .rpc('get_deployment_config', { p_organization_id: organizationId });
+      const { data: { session } } = await masterClient.auth.getSession();
+      if (!session) {
+        throw new Error('No session available');
+      }
 
-      if (error || !configs || configs.length === 0) {
+      const { data: configData, error } = await masterClient.functions.invoke('initialize-slave-client', {
+        body: {
+          organizationId: organizationId
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
+
+      if (error || !configData?.success || !configData?.slaveClient) {
         throw new Error('Failed to get deployment configuration');
       }
 
-      const deployment = configs[0];
-      const projectUrl = deployment.supabase_project_url || deployment.project_url;
-      const anonKey = deployment.supabase_anon_key || deployment.anon_key;
-      const serviceRoleKey = deployment.supabase_service_role_key || deployment.service_role_key;
-      const keyToUse = serviceRoleKey || anonKey;
+      const slaveConfig = configData.slaveClient;
+      const projectUrl = slaveConfig.projectUrl;
+      const anonKey = slaveConfig.anonKey;
+      // Use anon key (service_role_key is no longer exposed for security)
+      const keyToUse = anonKey;
 
       if (!projectUrl || !keyToUse) {
         throw new Error('Invalid deployment configuration');

@@ -475,10 +475,43 @@ export class AuthService {
         console.log('Sign up successful:', data.user.email);
         console.log('User data:', data);
         
-        // Create user profile and organization
-        await this.createUserProfile(data.user.id, email, organizationName);
-        
-        return { success: true };
+        // Call Edge Function to complete signup (create organization, slave schema, etc.)
+        try {
+          const { data: { session } } = await this.supabase.client.auth.getSession();
+          if (!session) {
+            throw new Error('No session available after signup');
+          }
+
+          const { data: completeSignupData, error: completeSignupError } = await this.supabase.client.functions.invoke('complete-signup', {
+            body: {
+              userId: data.user.id,
+              organizationName: organizationName
+            }
+          });
+
+          if (completeSignupError) {
+            console.error('Error completing signup:', completeSignupError);
+            this.updateAuthState({ 
+              isLoading: false, 
+              error: completeSignupError.message || 'Failed to complete signup setup' 
+            });
+            return { success: false, error: completeSignupError.message || 'Failed to complete signup setup' };
+          }
+
+          console.log('✅ Signup completed successfully:', completeSignupData);
+          
+          // Load user profile after successful signup completion
+          await this.loadUserProfile(data.user.id);
+          
+          return { success: true };
+        } catch (signupError: any) {
+          console.error('Error in signup completion:', signupError);
+          this.updateAuthState({ 
+            isLoading: false, 
+            error: signupError.message || 'Failed to complete signup' 
+          });
+          return { success: false, error: signupError.message || 'Failed to complete signup' };
+        }
       }
 
       return { success: false, error: 'Unknown error occurred' };
@@ -494,54 +527,6 @@ export class AuthService {
     }
   }
 
-  private async createUserProfile(userId: string, email: string, organizationName?: string) {
-    try {
-      console.log('Creating user profile and organization...');
-      
-      // Create organization first
-      const { data: orgData, error: orgError } = await this.supabase.executeRequest(async () => {
-        return await this.supabase.client
-          .from('organizations')
-          .insert({
-            name: organizationName || 'Default Organization',
-            plan: 'free'
-          })
-          .select()
-          .single();
-      });
-
-      if (orgError) {
-        console.error('Error creating organization:', orgError);
-        throw orgError;
-      }
-
-      // Create user profile
-      const { data: userData, error: userError } = await this.supabase.executeRequest(async () => {
-        return await this.supabase.client
-          .from('users')
-          .insert({
-            id: userId,
-            email: email,
-            organization_id: orgData.id,
-            role: UserRole.ORG_ADMIN
-          })
-          .select()
-          .single();
-      });
-
-      if (userError) {
-        console.error('Error creating user profile:', userError);
-        throw userError;
-      }
-
-      console.log('User profile and organization created successfully');
-      await this.loadUserProfile(userId);
-
-    } catch (error) {
-      console.error('Error creating user profile:', error);
-      throw error;
-    }
-  }
 
   async signOut(): Promise<void> {
     try {

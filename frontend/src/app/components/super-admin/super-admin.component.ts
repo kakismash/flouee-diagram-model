@@ -644,10 +644,11 @@ export class SuperAdminComponent implements OnInit {
         .from('organizations')
         .select('*', { count: 'exact', head: true });
 
-      // Count total users
+      // Count total users (with organizations)
       const { count: usersCount } = await this.deploymentService.getMasterClient()
-        .from('user_organizations')
-        .select('*', { count: 'exact', head: true });
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .not('organization_id', 'is', null);
 
       // Count slave projects
       const { count: slavesCount } = await this.deploymentService.getMasterClient()

@@ -35,41 +35,48 @@ export class SlaveDataService {
    */
   async initializeSlaveClient(organizationId: string): Promise<void> {
     try {
-      // Get deployment config using RPC (same as DeploymentService)
-      const { data: configs, error } = await this.masterClient
-        .rpc('get_deployment_config', { p_organization_id: organizationId });
+      // Get deployment config using Edge Function (secure, no service_role_key exposed)
+      const { data: { session } } = await this.masterClient.auth.getSession();
+      if (!session) {
+        throw new Error('No session available');
+      }
+
+      const { data: configData, error } = await this.masterClient.functions.invoke('initialize-slave-client', {
+        body: {
+          organizationId: organizationId
+        },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
 
       if (error) {
         console.error('Failed to get deployment config:', error);
         throw new Error(`Failed to get deployment configuration: ${error.message}`);
       }
 
-      if (!configs || configs.length === 0) {
+      if (!configData?.success || !configData?.slaveClient) {
         console.error('No deployment config found for organization:', organizationId);
         throw new Error('No deployment configuration found. Please ensure a deployment configuration exists in the Master database.');
       }
 
-      const deployment = configs[0];
-
-      // Access fields using the same naming convention as DeploymentService
-      // The RPC may transform column names (snake_case -> camelCase or vice versa)
-      const projectUrl = deployment.supabase_project_url || deployment.project_url;
-      const anonKey = deployment.supabase_anon_key || deployment.anon_key;
+      const slaveClient = configData.slaveClient;
+      const projectUrl = slaveClient.projectUrl;
+      const anonKey = slaveClient.anonKey;
 
       // Validate required fields
       if (!projectUrl || !anonKey) {
         console.error('Invalid deployment config - missing required fields:', {
-          deployment,
+          slaveClient,
           hasProjectUrl: !!projectUrl,
           hasAnonKey: !!anonKey
         });
         throw new Error('Invalid deployment configuration: missing project URL or anon key');
       }
 
-      // Use service role key if available, otherwise use anon key
-      // Service role key is needed for direct inserts into custom schemas
-      const serviceRoleKey = deployment.supabase_service_role_key || deployment.service_role_key;
-      const keyToUse = serviceRoleKey || anonKey;
+      // Use anon key (service_role_key is no longer exposed for security)
+      // NOTE: For operations requiring service_role_key, they should be done via Edge Functions
+      const keyToUse = anonKey;
       
       // Create Slave client without session persistence to avoid NavigatorLock conflicts
       this.slaveClient = createClient(projectUrl, keyToUse, {
