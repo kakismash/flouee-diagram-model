@@ -133,14 +133,25 @@ export class PlanLimitsService {
     tier: string;
   } | null> {
     try {
+      // Use maybeSingle() instead of single() to handle cases where RLS blocks access
       const { data, error } = await this.supabase
         .from('organizations')
         .select('max_projects, max_tables_per_project, max_users, subscription_tier')
         .eq('id', organizationId)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
+      if (error) {
         console.error('Error getting organization limits:', error);
+        // If RLS blocks access (PGRST116), return null gracefully
+        if (error.code === 'PGRST116') {
+          console.warn('⚠️ Organization not accessible via RLS, returning null');
+          return null;
+        }
+        return null;
+      }
+
+      if (!data) {
+        console.warn('⚠️ Organization not found or not accessible');
         return null;
       }
 

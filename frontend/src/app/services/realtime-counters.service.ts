@@ -219,13 +219,19 @@ export class RealtimeCountersService implements OnDestroy {
     try {
       console.log(`🔄 Loading ATOMIC counters for organization: ${organizationId}`);
       
+      // Use maybeSingle() instead of single() to handle cases where RLS blocks access
       const { data, error } = await this.supabase
         .from('organizations')
         .select('*')
         .eq('id', organizationId)
-        .single();
+        .maybeSingle();
 
       if (error) {
+        // If RLS blocks access (PGRST116), log warning but don't fail
+        if (error.code === 'PGRST116') {
+          console.warn(`⚠️ Organization ${organizationId} not accessible via RLS - counters will not be loaded`);
+          return;
+        }
         console.error('Error loading organization counters atomically:', error);
         return;
       }
@@ -233,6 +239,8 @@ export class RealtimeCountersService implements OnDestroy {
       if (data) {
         console.log(`✅ ATOMIC counters loaded for ${organizationId}:`, data);
         this.updateCounters([data]);
+      } else {
+        console.warn(`⚠️ Organization ${organizationId} not found or not accessible`);
       }
     } catch (error) {
       console.error('Exception loading organization counters atomically:', error);
