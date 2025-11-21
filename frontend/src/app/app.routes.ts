@@ -5,6 +5,7 @@ import { DashboardComponent } from './components/dashboard/dashboard.component';
 import { ViewModeComponent } from './components/view-mode/view-mode.component';
 import { OrganizationSettingsComponent } from './components/organization-settings/organization-settings.component';
 import { SuperAdminComponent } from './components/super-admin/super-admin.component';
+import { NotFoundComponent } from './components/not-found/not-found.component';
 import { AuthGuard } from './guards/auth.guard';
 import { SuperAdminGuard } from './guards/super-admin.guard';
 import { AuthenticatedLayoutComponent } from './modules/authenticated/authenticated-layout.component';
@@ -55,5 +56,5 @@ export const routes: Routes = [
     ]
   },
   
-  { path: '**', redirectTo: '/dashboard' }
+  { path: '**', component: NotFoundComponent }
 ];

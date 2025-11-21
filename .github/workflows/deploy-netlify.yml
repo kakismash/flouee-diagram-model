@@ -50,6 +50,26 @@ jobs:
             exit 1
           fi
           echo "✅ Build output verified"
+      
+      - name: Copy Netlify configuration to build output
+        working-directory: ./frontend
+        run: |
+          # Copy netlify.toml to build output directory
+          if [ -f "netlify.toml" ]; then
+            cp netlify.toml dist/frontend/browser/netlify.toml
+            echo "✅ Copied netlify.toml to build output"
+          else
+            echo "⚠️  netlify.toml not found in frontend directory"
+          fi
+          
+          # Verify _redirects file exists (should be copied from public/ during build)
+          if [ -f "dist/frontend/browser/_redirects" ]; then
+            echo "✅ _redirects file found in build output"
+          else
+            echo "⚠️  _redirects file not found - creating it..."
+            echo "/*    /index.html   200" > dist/frontend/browser/_redirects
+            echo "✅ Created _redirects file"
+          fi
 
       - name: Setup Netlify CLI
         run: |
