@@ -83,9 +83,10 @@ serve(async (req) => {
     }
 
     // 2. Check if user is already linked to an organization (check users table)
+    // Also check if there's another user with the same email (to avoid conflicts)
     const { data: existingUser, error: userError } = await masterClient
       .from('users')
-      .select('organization_id')
+      .select('id, organization_id, email')
       .eq('id', userId)
       .maybeSingle()
 
@@ -107,6 +108,50 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       )
+    }
+
+    // Check if there's another user with the same email but different ID
+    // This can happen if user signed up multiple times with the same email
+    if (authUser.email) {
+      const { data: emailConflict, error: emailError } = await masterClient
+        .from('users')
+        .select('id, organization_id')
+        .eq('email', authUser.email)
+        .neq('id', userId)
+        .maybeSingle()
+
+      if (emailError) {
+        console.warn('⚠️ Error checking email conflicts:', emailError)
+      } else if (emailConflict) {
+        // If the conflicting user has no organization, delete it to avoid constraint violation
+        if (!emailConflict.organization_id) {
+          console.log(`⚠️ Found orphaned user with same email (${emailConflict.id}), deleting...`)
+          const { error: deleteError } = await masterClient
+            .from('users')
+            .delete()
+            .eq('id', emailConflict.id)
+          
+          if (deleteError) {
+            console.error('❌ Error deleting orphaned user:', deleteError)
+            // Continue anyway - upsert should handle it
+          } else {
+            console.log('✅ Orphaned user deleted')
+          }
+        } else {
+          // Conflicting user has an organization - this is a real conflict
+          console.error('❌ Email already exists with different user ID and has organization')
+          return new Response(
+            JSON.stringify({ 
+              error: 'Email already registered with a different account',
+              details: 'Please use a different email or contact support'
+            }),
+            { 
+              status: 409, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+      }
     }
 
     // 3. Generate organization slug from name
@@ -227,6 +272,33 @@ serve(async (req) => {
 
       // Create user record in users table with organization_id
       // This is the primary way to link users to organizations
+      // First, check if there's a user with the same email but different ID
+      if (authUser.email) {
+        const { data: emailConflict } = await masterClient
+          .from('users')
+          .select('id')
+          .eq('email', authUser.email)
+          .neq('id', userId)
+          .maybeSingle()
+
+        if (emailConflict) {
+          // Delete the conflicting user if it has no organization
+          const { data: conflictUser } = await masterClient
+            .from('users')
+            .select('organization_id')
+            .eq('id', emailConflict.id)
+            .maybeSingle()
+
+          if (conflictUser && !conflictUser.organization_id) {
+            console.log(`⚠️ Deleting orphaned user with same email: ${emailConflict.id}`)
+            await masterClient
+              .from('users')
+              .delete()
+              .eq('id', emailConflict.id)
+          }
+        }
+      }
+
       const { error: userTableError } = await masterClient
         .from('users')
         .upsert({
