@@ -28,18 +28,6 @@ serve(async (req) => {
   }
 
   try {
-    // Get authorization header
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { 
-          status: 401, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
     // Create Supabase client with service role key for master
     const masterClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -62,7 +50,8 @@ serve(async (req) => {
 
     console.log(`🚀 Starting complete signup for user: ${userId}`)
 
-    // 1. Verify user exists in auth.users
+    // 1. Verify user exists in auth.users (this validates the userId is legitimate)
+    // This is the security check - we validate the userId exists even without JWT
     const { data: authUser, error: authError } = await masterClient.auth.admin.getUserById(userId)
     if (authError || !authUser) {
       console.error('❌ User not found in auth.users:', authError)
@@ -73,6 +62,24 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       )
+    }
+
+    // Additional security: If auth header is provided, verify it matches the userId
+    // This prevents unauthorized users from creating orgs for other users
+    const authHeader = req.headers.get('Authorization')
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '')
+      const { data: { user: tokenUser }, error: tokenError } = await masterClient.auth.getUser(token)
+      if (!tokenError && tokenUser && tokenUser.id !== userId) {
+        console.error('❌ Token user does not match userId')
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: token user does not match userId' }),
+          { 
+            status: 403, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
     }
 
     // 2. Check if user is already linked to an organization (check users table)

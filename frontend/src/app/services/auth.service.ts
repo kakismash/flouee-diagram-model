@@ -6,6 +6,7 @@ import { ThemeService } from './theme.service';
 import { BehaviorSubject, Observable, from, of } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
 import { UserRole } from '../models/user-role.model';
+import { environment } from '../../environments/environment';
 
 export interface User {
   id: string;
@@ -283,6 +284,104 @@ export class AuthService {
       if (error) {
         console.error('❌ Error loading user profile:', error);
         console.error('Error details:', JSON.stringify(error, null, 2));
+        
+        // Check if error is because user profile doesn't exist (likely after email confirmation)
+        // This happens when user confirms email but complete-signup wasn't called yet
+        if (error.code === 'PGRST116' || error.message?.includes('No rows') || error.message?.includes('not found')) {
+          console.log('ℹ️ User profile not found - likely after email confirmation. Attempting to complete signup...');
+          
+          try {
+            // Get current session to call complete-signup
+            const { data: { session } } = await this.supabase.client.auth.getSession();
+            
+            if (session?.access_token) {
+              // Call complete-signup Edge Function to create organization and user profile
+              const { data: completeSignupData, error: completeSignupError } = await this.supabase.client.functions.invoke('complete-signup', {
+                body: {
+                  userId: userId,
+                  organizationName: session.user.user_metadata?.['organization_name']
+                },
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`
+                }
+              });
+
+              if (completeSignupError) {
+                console.error('❌ Error completing signup after email confirmation:', completeSignupError);
+                this.updateAuthState({ 
+                  user: null, 
+                  isAuthenticated: false, 
+                  isLoading: false, 
+                  error: `Failed to complete signup: ${completeSignupError.message}` 
+                });
+                return;
+              }
+
+              console.log('✅ Signup completed successfully after email confirmation:', completeSignupData);
+              
+              // Retry loading user profile after signup completion
+              const { data: retryData, error: retryError } = await this.supabase.executeRequest(async () => {
+                return await this.supabase.client
+                  .from('users')
+                  .select('*')
+                  .eq('id', userId)
+                  .single();
+              });
+
+              if (retryError || !retryData) {
+                console.error('❌ Error loading user profile after signup completion:', retryError);
+                this.updateAuthState({ 
+                  user: null, 
+                  isAuthenticated: false, 
+                  isLoading: false, 
+                  error: 'Profile created but failed to load. Please refresh the page.' 
+                });
+                return;
+              }
+
+              // Success - profile loaded after signup completion
+              console.log('✅ User profile loaded after signup completion:', retryData);
+              this.lastLoadedUserId = userId;
+              this.hasBeenInitialized = true;
+              
+              // Initialize deployment service
+              try {
+                await this.deploymentService.initialize(userId);
+                console.log('✅ Deployment service initialized after signup completion');
+              } catch (deployError) {
+                console.warn('⚠️ Failed to initialize deployment service:', deployError);
+              }
+              
+              this.updateAuthState({ 
+                user: retryData, 
+                isAuthenticated: true, 
+                isLoading: false, 
+                error: null 
+              });
+              return;
+            } else {
+              console.error('❌ No session available to complete signup');
+              this.updateAuthState({ 
+                user: null, 
+                isAuthenticated: false, 
+                isLoading: false, 
+                error: 'No session available. Please try logging in again.' 
+              });
+              return;
+            }
+          } catch (signupException: any) {
+            console.error('❌ Exception during signup completion:', signupException);
+            this.updateAuthState({ 
+              user: null, 
+              isAuthenticated: false, 
+              isLoading: false, 
+              error: `Failed to complete signup: ${signupException.message}` 
+            });
+            return;
+          }
+        }
+        
+        // Other errors (RLS, permissions, etc.)
         console.error('⚠️ This usually means:');
         console.error('   1. RLS policies are blocking the query (recursion error)');
         console.error('   2. User profile doesn\'t exist in "users" table');
@@ -318,16 +417,100 @@ export class AuthService {
         
         // Note: Theme will be applied by ThemeService when it detects user authentication
       } else {
+        // No data returned - user profile doesn't exist (likely after email confirmation)
         console.warn('⚠️ No user profile found for:', userId);
         console.warn('User exists in auth.users but not in public.users table');
-        console.warn('This means the signup trigger didn\'t work correctly');
+        console.log('ℹ️ Attempting to complete signup...');
         
-        this.updateAuthState({ 
-          user: null, 
-          isAuthenticated: false, 
-          isLoading: false, 
-          error: 'User profile not found - please contact support' 
-        });
+        try {
+          // Get current session to call complete-signup
+          const { data: { session } } = await this.supabase.client.auth.getSession();
+          
+          if (session?.access_token) {
+            // Call complete-signup Edge Function to create organization and user profile
+            const { data: completeSignupData, error: completeSignupError } = await this.supabase.client.functions.invoke('complete-signup', {
+              body: {
+                userId: userId,
+                organizationName: session.user.user_metadata?.['organization_name']
+              },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`
+              }
+            });
+
+            if (completeSignupError) {
+              console.error('❌ Error completing signup after email confirmation:', completeSignupError);
+              this.updateAuthState({ 
+                user: null, 
+                isAuthenticated: false, 
+                isLoading: false, 
+                error: `Failed to complete signup: ${completeSignupError.message}` 
+              });
+              return;
+            }
+
+            console.log('✅ Signup completed successfully after email confirmation:', completeSignupData);
+            
+            // Retry loading user profile after signup completion
+            const { data: retryData, error: retryError } = await this.supabase.executeRequest(async () => {
+              return await this.supabase.client
+                .from('users')
+                .select('*')
+                .eq('id', userId)
+                .single();
+            });
+
+            if (retryError || !retryData) {
+              console.error('❌ Error loading user profile after signup completion:', retryError);
+              this.updateAuthState({ 
+                user: null, 
+                isAuthenticated: false, 
+                isLoading: false, 
+                error: 'Profile created but failed to load. Please refresh the page.' 
+              });
+              return;
+            }
+
+            // Success - profile loaded after signup completion
+            console.log('✅ User profile loaded after signup completion:', retryData);
+            this.lastLoadedUserId = userId;
+            this.hasBeenInitialized = true;
+            
+            // Initialize deployment service
+            try {
+              await this.deploymentService.initialize(userId);
+              console.log('✅ Deployment service initialized after signup completion');
+            } catch (deployError) {
+              console.warn('⚠️ Failed to initialize deployment service:', deployError);
+            }
+            
+            this.updateAuthState({ 
+              user: retryData, 
+              isAuthenticated: true, 
+              isLoading: false, 
+              error: null 
+            });
+            return;
+          } else {
+            console.error('❌ No session available to complete signup');
+            this.updateAuthState({ 
+              user: null, 
+              isAuthenticated: false, 
+              isLoading: false, 
+              error: 'No session available. Please try logging in again.' 
+            });
+            return;
+          }
+        } catch (signupException: any) {
+          console.error('❌ Exception during signup completion:', signupException);
+          this.updateAuthState({ 
+            user: null, 
+            isAuthenticated: false, 
+            isLoading: false, 
+            error: `Failed to complete signup: ${signupException.message}` 
+          });
+          return;
+        }
       }
 
     } catch (error: any) {
@@ -441,7 +624,7 @@ export class AuthService {
     }
   }
 
-  async signUp(email: string, password: string, organizationName?: string): Promise<{ success: boolean; error?: string }> {
+  async signUp(email: string, password: string, organizationName?: string): Promise<{ success: boolean; error?: string; requiresEmailConfirmation?: boolean; message?: string }> {
     try {
       console.log('Attempting to sign up:', email);
       this.updateAuthState({ isLoading: true, error: null });
@@ -477,17 +660,39 @@ export class AuthService {
         
         // Call Edge Function to complete signup (create organization, slave schema, etc.)
         try {
+          // Try to get session, but if email confirmation is required, session might be null
+          // The Edge Function can work without session because it uses service_role_key
           const { data: { session } } = await this.supabase.client.auth.getSession();
-          if (!session) {
-            throw new Error('No session available after signup');
+          
+          // Call Edge Function - if no session, we'll use anon_key directly via fetch
+          let completeSignupData: any;
+          let completeSignupError: any;
+          
+          if (session?.access_token) {
+            // Use normal invoke with session token
+            const result = await this.supabase.client.functions.invoke('complete-signup', {
+              body: {
+                userId: data.user.id,
+                organizationName: organizationName
+              },
+              headers: {
+                Authorization: `Bearer ${session.access_token}`
+              }
+            });
+            completeSignupData = result.data;
+            completeSignupError = result.error;
+          } else {
+            // No session available - this happens when email confirmation is required
+            // The Edge Function requires verify_jwt: true, which means we need a valid session
+            // We'll skip the Edge Function call for now and let it complete after email confirmation
+            // The user will be able to complete signup after confirming their email
+            console.log('ℹ️ No session available - email confirmation required. Signup will complete after email confirmation.');
+            completeSignupData = { 
+              success: true, 
+              requiresEmailConfirmation: true,
+              message: 'Please check your email to confirm your account. After confirmation, your organization will be set up automatically.'
+            };
           }
-
-          const { data: completeSignupData, error: completeSignupError } = await this.supabase.client.functions.invoke('complete-signup', {
-            body: {
-              userId: data.user.id,
-              organizationName: organizationName
-            }
-          });
 
           if (completeSignupError) {
             console.error('Error completing signup:', completeSignupError);
@@ -500,7 +705,22 @@ export class AuthService {
 
           console.log('✅ Signup completed successfully:', completeSignupData);
           
-          // Load user profile after successful signup completion
+          // If email confirmation is required, user won't have a session yet
+          // In that case, we'll show a message and they'll complete signup after email confirmation
+          if (!session) {
+            console.log('ℹ️ No session available - email confirmation required');
+            this.updateAuthState({ 
+              isLoading: false, 
+              error: null 
+            });
+            return { 
+              success: true, 
+              requiresEmailConfirmation: true,
+              message: 'Please check your email to confirm your account. After confirmation, your organization will be set up automatically.'
+            };
+          }
+          
+          // Load user profile after successful signup completion (only if session exists)
           await this.loadUserProfile(data.user.id);
           
           return { success: true };
