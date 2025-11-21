@@ -72,13 +72,20 @@ serve(async (req) => {
         )
       `)
       .eq('id', userId)
-      .single()
+      .maybeSingle()
 
-    if (userCheckError) {
+    // If user doesn't exist in users table (e.g., after email confirmation but before complete-signup)
+    // Return empty array instead of error - this allows frontend to detect and call complete-signup
+    if (userCheckError || !userRecord) {
+      console.log(`ℹ️ User ${userId} not found in users table - likely needs to complete signup`)
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch user data' }),
+        JSON.stringify({
+          success: true,
+          organizations: [],
+          userNotFound: true // Flag to indicate user needs to complete signup
+        }),
         { 
-          status: 500, 
+          status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       )

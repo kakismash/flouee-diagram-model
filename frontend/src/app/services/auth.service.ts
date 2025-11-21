@@ -181,9 +181,39 @@ export class AuthService {
           // No delay needed - deployment service handles initialization properly
           await this.deploymentService.initialize(session.user.id);
           console.log('✅ Deployment service initialized from existing session');
-        } catch (deployError) {
-          console.warn('⚠️ Could not initialize deployment service:', deployError);
-          // Not critical, continue anyway
+        } catch (deployError: any) {
+          // Check if error is because user needs to complete signup
+          if (deployError?.message === 'USER_NEEDS_SIGNUP_COMPLETION') {
+            console.log('ℹ️ User needs to complete signup - attempting automatic completion...');
+            // Try to complete signup automatically
+            try {
+              const { data: completeSignupData, error: completeSignupError } = await this.supabase.client.functions.invoke('complete-signup', {
+                body: {
+                  userId: session.user.id,
+                  organizationName: session.user.user_metadata?.['organization_name']
+                },
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`
+                }
+              });
+
+              if (completeSignupError) {
+                console.error('❌ Error completing signup:', completeSignupError);
+                // Don't throw - let user see the error and retry
+              } else {
+                console.log('✅ Signup completed successfully, retrying deployment service initialization...');
+                // Retry initialization after signup completion
+                await this.deploymentService.initialize(session.user.id);
+                console.log('✅ Deployment service initialized after signup completion');
+              }
+            } catch (signupException: any) {
+              console.error('❌ Exception during signup completion:', signupException);
+              // Don't throw - let the original error be shown
+            }
+          } else {
+            console.warn('⚠️ Could not initialize deployment service:', deployError);
+            // Not critical, continue anyway
+          }
         }
         
         await this.loadUserProfile(session.user.id);

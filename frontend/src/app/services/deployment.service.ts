@@ -78,6 +78,12 @@ export class DeploymentService {
         throw orgsError;
       }
 
+      // Check if user needs to complete signup (user not found in users table)
+      if (orgsData?.userNotFound) {
+        console.log('ℹ️ User not found in users table - needs to complete signup');
+        throw new Error('USER_NEEDS_SIGNUP_COMPLETION');
+      }
+
       const orgs = orgsData?.organizations || [];
 
       // IMPORTANT: Organization is OPTIONAL
