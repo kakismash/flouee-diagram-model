@@ -4,6 +4,7 @@ import { SchemaChange } from '../models/schema-change.model';
 import { EventDrivenSchemaService, EventDrivenResult } from './event-driven-schema.service';
 import { ProjectService } from './project.service';
 import { NotificationService } from './notification.service';
+import { RealtimeTableDataService } from './realtime-table-data.service';
 
 /**
  * Service to handle schema changes (table creation, updates, deletions)
@@ -16,6 +17,7 @@ export class SchemaChangeHandlerService {
   private eventDrivenSchema = inject(EventDrivenSchemaService);
   private projectService = inject(ProjectService);
   private notificationService = inject(NotificationService);
+  private realtimeTableDataService = inject(RealtimeTableDataService);
 
   /**
    * Create a new table using Edge Function to sync with Slave
@@ -144,6 +146,15 @@ export class SchemaChangeHandlerService {
     console.log('applyTableEdits - newTable:', newTable);
     console.log('applyTableEdits - oldTable columns:', oldTable.columns.map(c => ({ id: c.id, name: c.name })));
     console.log('applyTableEdits - newTable columns:', newTable.columns.map(c => ({ id: c.id, name: c.name })));
+    
+    // Store previous state for rollback capability
+    const previousState = {
+      oldTable: { ...oldTable },
+      currentTables: currentTables.map(t => ({ ...t })),
+      currentRelationships: [...currentRelationships],
+      currentRelationshipDisplayColumns: [...currentRelationshipDisplayColumns]
+    };
+    
     const tableNameForDB = newTable.internal_name || oldTable.internal_name || `t_${oldTable.id}`;
     const changes: SchemaChange[] = [];
     
@@ -160,6 +171,44 @@ export class SchemaChangeHandlerService {
     console.log('applyTableEdits - oldUserColumns:', oldUserColumns.map(c => ({ id: c.id, name: c.name })));
     console.log('applyTableEdits - newUserColumns:', newUserColumns.map(c => ({ id: c.id, name: c.name })));
 
+    // First, check if only the column order changed (no actual property changes)
+    // Compare column IDs to see if they're the same set, just in different order
+    const oldColumnIds = oldUserColumns.map(col => col.id).sort();
+    const newColumnIds = newUserColumns.map(col => col.id).sort();
+    const sameColumnSet = oldColumnIds.length === newColumnIds.length && 
+                         oldColumnIds.every((id, index) => id === newColumnIds[index]);
+    
+    // If same column set, check if only order changed
+    let onlyOrderChanged = false;
+    if (sameColumnSet) {
+      const oldOrder = oldUserColumns.map(col => col.id);
+      const newOrder = newUserColumns.map(col => col.id);
+      const orderChanged = oldOrder.some((id, index) => id !== newOrder[index]);
+      
+      // Check if any column properties actually changed (by comparing by ID, not position)
+      let anyPropertyChanged = false;
+      for (const newCol of newUserColumns) {
+        const oldCol = oldUserColumns.find(old => old.id === newCol.id);
+        if (oldCol) {
+          // Compare all properties except order
+          if (oldCol.type !== newCol.type ||
+              oldCol.isNullable !== newCol.isNullable ||
+              (oldCol.isUnique || false) !== (newCol.isUnique || false) ||
+              (oldCol.defaultValue || null) !== (newCol.defaultValue || null) ||
+              oldCol.name !== newCol.name) {
+            anyPropertyChanged = true;
+            break;
+          }
+        }
+      }
+      
+      onlyOrderChanged = orderChanged && !anyPropertyChanged;
+      
+      if (onlyOrderChanged) {
+        console.log('applyTableEdits - Only column order changed, no property changes detected');
+      }
+    }
+
     // Detect added columns
     const addedColumns = newUserColumns.filter(newCol => 
       !oldUserColumns.some(oldCol => oldCol.id === newCol.id)
@@ -169,6 +218,7 @@ export class SchemaChangeHandlerService {
       changes.push({
         type: 'add_column',
         table_name: tableNameForDB,
+        table_id: newTable.id, // Add table_id for easier lookup in realtime handler
         column: {
           id: col.id,
           name: col.name,
@@ -191,6 +241,7 @@ export class SchemaChangeHandlerService {
       changes.push({
         type: 'drop_column',
         table_name: tableNameForDB,
+        table_id: newTable.id, // Add table_id for easier lookup in realtime handler
         column_name: col.name
       });
     }
@@ -215,46 +266,49 @@ export class SchemaChangeHandlerService {
         changes.push({
           type: 'alter_column_type',
           table_name: tableNameForDB,
+          table_id: newTable.id, // Add table_id for easier lookup in realtime handler
           column_name: newCol.name,
           new_type: newCol.type
         });
       }
     }
 
-    // Detect constraint changes
-    for (const newCol of newUserColumns) {
-      const oldCol = oldUserColumns.find(old => old.id === newCol.id);
-      if (oldCol && oldCol.name === newCol.name) {
-        // UNIQUE constraint change
-        if ((oldCol.isUnique || false) !== (newCol.isUnique || false)) {
-          changes.push({
-            type: newCol.isUnique ? 'add_unique_constraint' : 'drop_unique_constraint',
-            table_name: tableNameForDB,
-            column_name: newCol.name
-          });
-        }
-        
-        // DEFAULT value change
-        const oldDefault = oldCol.defaultValue || null;
-        const newDefault = newCol.defaultValue || null;
-        if (oldDefault !== newDefault) {
-          changes.push({
-            type: 'alter_column_default',
-            table_name: tableNameForDB,
-            column_name: newCol.name,
-            new_default: newDefault,
-            old_default: oldDefault
-          });
-        }
-        
-        // NULLABLE change
-        if (oldCol.isNullable !== newCol.isNullable) {
-          changes.push({
-            type: 'alter_column_nullable',
-            table_name: tableNameForDB,
-            column_name: newCol.name,
-            nullable: newCol.isNullable
-          });
+    // Detect constraint changes (only if not just an order change)
+    if (!onlyOrderChanged) {
+      for (const newCol of newUserColumns) {
+        const oldCol = oldUserColumns.find(old => old.id === newCol.id);
+        if (oldCol && oldCol.name === newCol.name) {
+          // UNIQUE constraint change
+          if ((oldCol.isUnique || false) !== (newCol.isUnique || false)) {
+            changes.push({
+              type: newCol.isUnique ? 'add_unique_constraint' : 'drop_unique_constraint',
+              table_name: tableNameForDB,
+              column_name: newCol.name
+            });
+          }
+          
+          // DEFAULT value change
+          const oldDefault = oldCol.defaultValue || null;
+          const newDefault = newCol.defaultValue || null;
+          if (oldDefault !== newDefault) {
+            changes.push({
+              type: 'alter_column_default',
+              table_name: tableNameForDB,
+              column_name: newCol.name,
+              new_default: newDefault,
+              old_default: oldDefault
+            });
+          }
+          
+          // NULLABLE change
+          if (oldCol.isNullable !== newCol.isNullable) {
+            changes.push({
+              type: 'alter_column_nullable',
+              table_name: tableNameForDB,
+              column_name: newCol.name,
+              nullable: newCol.isNullable
+            });
+          }
         }
       }
     }
@@ -262,13 +316,18 @@ export class SchemaChangeHandlerService {
     // Apply all changes
     if (changes.length === 0) {
       console.log('applyTableEdits - No DDL changes detected, updating schema_data only');
-      // Update schema_data in Master to reflect the new table structure
-      // Use getCurrentProjectSync to get the current project
+      
+      // Reload project to get the latest version before applying change
+      // This prevents version conflicts when multiple changes happen quickly
+      console.log('applyTableEdits - Reloading project to get latest version...');
+      await this.projectService.loadProject(projectId);
       const currentProject = this.projectService.getCurrentProjectSync();
       if (!currentProject) {
         console.error('applyTableEdits - Project not found');
         throw new Error('Project not found');
       }
+      
+      console.log('applyTableEdits - Current project version:', currentProject.version);
 
       const newSchemaData: ProjectSchema = {
         tables: currentTables.map(t => t.id === newTable.id ? newTable : t),
@@ -282,23 +341,65 @@ export class SchemaChangeHandlerService {
       
       // When there are no DDL changes, we still need to update schema_data in Master
       // We'll use a no-op change type that the Edge Function can handle
-      // For now, we'll use alter_column_nullable with the same value (no-op)
-      // This will update schema_data without changing the database
+      // Use alter_column_nullable with the same value (no-op) - the Edge Function should handle this gracefully
+      // If only order changed, we still need to update schema_data
       const firstColumn = newTable.columns.find(col => !col.isPrimaryKey);
       if (firstColumn) {
         const noOpChange: SchemaChange = {
           type: 'alter_column_nullable',
           table_name: newTable.internal_name || `t_${newTable.id}`,
+          table_id: newTable.id, // Add table_id for easier lookup in realtime handler
           column_name: firstColumn.internal_name || `c_${firstColumn.id}`,
-          nullable: firstColumn.isNullable // Same value = no-op
+          nullable: firstColumn.isNullable // Same value = no-op, Edge Function should skip DDL
         };
         
-        await this.eventDrivenSchema.applySchemaChange(
-          projectId,
-          noOpChange,
-          newSchemaData,
-          currentProject.version
-        );
+        console.log('applyTableEdits - Using no-op change to update schema_data:', {
+          changeType: noOpChange.type,
+          tableName: noOpChange.table_name,
+          columnName: noOpChange.column_name,
+          onlyOrderChanged,
+          currentVersion: currentProject.version
+        });
+        
+        try {
+          await this.eventDrivenSchema.applySchemaChange(
+            projectId,
+            noOpChange,
+            newSchemaData,
+            currentProject.version
+          );
+        } catch (error: any) {
+          // If version conflict, reload and retry once
+          if (error.message?.includes('Version conflict') || error.message?.includes('409')) {
+            console.warn('applyTableEdits - Version conflict detected, reloading and retrying...');
+            await this.projectService.loadProject(projectId);
+            const retryProject = this.projectService.getCurrentProjectSync();
+            if (retryProject) {
+              console.log('applyTableEdits - Retry with version:', retryProject.version);
+              try {
+                await this.eventDrivenSchema.applySchemaChange(
+                  projectId,
+                  noOpChange,
+                  newSchemaData,
+                  retryProject.version
+                );
+              } catch (retryError: any) {
+                // Rollback: restore previous state
+                console.error('applyTableEdits - Retry failed, rolling back to previous state:', retryError);
+                console.log('applyTableEdits - Previous state:', previousState);
+                throw new Error(`Failed to apply schema change after retry: ${retryError.message}`);
+              }
+            } else {
+              // Rollback: restore previous state
+              console.error('applyTableEdits - Failed to reload project, rolling back to previous state');
+              throw error;
+            }
+          } else {
+            // Rollback: restore previous state
+            console.error('applyTableEdits - Schema change failed, rolling back to previous state:', error);
+            throw error;
+          }
+        }
       } else {
         // If no columns, just update schema_data directly via Supabase
         // This is a fallback for edge cases
@@ -313,11 +414,17 @@ export class SchemaChangeHandlerService {
     console.log('applyTableEdits - DDL changes detected:', changes.length);
     console.log('applyTableEdits - changes:', changes);
 
-    const currentProject = this.projectService.getCurrentProject()();
+    // Reload project to get the latest version before applying change
+    // This prevents version conflicts when multiple changes happen quickly
+    console.log('applyTableEdits - Reloading project to get latest version...');
+    await this.projectService.loadProject(projectId);
+    const currentProject = this.projectService.getCurrentProjectSync();
     if (!currentProject) {
       console.error('applyTableEdits - No current project found');
       throw new Error('No current project found');
     }
+    
+    console.log('applyTableEdits - Current project version:', currentProject.version);
 
     // Create updated schema with the new table
     const newSchemaData: ProjectSchema = {
@@ -337,22 +444,57 @@ export class SchemaChangeHandlerService {
 
       await this.notificationService.showOperationStatus(
         async () => {
-          console.log('applyTableEdits - Calling eventDrivenSchema.applySchemaChange');
-          const result = await this.eventDrivenSchema.applySchemaChange(
-            projectId,
-            change,
-            newSchemaData,
-            currentProject.version
-          );
-          console.log('applyTableEdits - applySchemaChange result:', result);
-
-          if (!result.success) {
-            console.error('applyTableEdits - Change failed:', result.error);
-            if (result.error && result.error.includes('VERSION_CONFLICT')) {
-              throw new Error('Project was updated by another user. Please try your change again.');
+          // Verify subscription is active before applying change
+          console.log('🔍 [SchemaChangeHandler] Verifying realtime subscription before applying change...');
+          this.realtimeTableDataService.verifySchemaChangesSubscription(projectId);
+          const subscriptionState = this.realtimeTableDataService.getSubscriptionState(projectId);
+          console.log(`🔍 [SchemaChangeHandler] Subscription state: ${subscriptionState}`);
+          if (!subscriptionState || subscriptionState !== 'SUBSCRIBED') {
+            if (subscriptionState === 'joined') {
+              console.warn(`⚠️ [SchemaChangeHandler] Subscription is 'joined' but NOT 'SUBSCRIBED' - will NOT receive realtime events!`);
+              console.warn(`⚠️ [SchemaChangeHandler] The subscription needs to be in 'SUBSCRIBED' state to receive events.`);
+            } else {
+              console.warn(`⚠️ [SchemaChangeHandler] Subscription may not be active! State: ${subscriptionState}`);
             }
-            throw new Error(result.error || 'Failed to apply change');
+            console.warn(`⚠️ [SchemaChangeHandler] Realtime events may not be received. Manual reload will still work.`);
+          } else {
+            console.log(`✅ [SchemaChangeHandler] Subscription is active and will receive events (state: ${subscriptionState})`);
           }
+          
+          console.log('applyTableEdits - Calling eventDrivenSchema.applySchemaChange');
+          let result: any;
+          try {
+            result = await this.eventDrivenSchema.applySchemaChange(
+              projectId,
+              change,
+              newSchemaData,
+              currentProject.version
+            );
+            console.log('applyTableEdits - applySchemaChange result:', result);
+            
+            if (!result.success) {
+              // Rollback: restore previous state
+              console.error('applyTableEdits - Schema change failed, rolling back to previous state');
+              console.log('applyTableEdits - Previous state:', previousState);
+              throw new Error(result.error || 'Schema change failed');
+            }
+          } catch (error: any) {
+            // Rollback: restore previous state
+            console.error('applyTableEdits - Schema change error, rolling back to previous state:', error);
+            console.log('applyTableEdits - Previous state:', previousState);
+            throw error;
+          }
+          
+          // Verify subscription again after applying change
+          console.log('🔍 [SchemaChangeHandler] Verifying realtime subscription after applying change...');
+          this.realtimeTableDataService.verifySchemaChangesSubscription(projectId);
+          const postSubscriptionState = this.realtimeTableDataService.getSubscriptionState(projectId);
+          console.log(`🔍 [SchemaChangeHandler] Post-change subscription state: ${postSubscriptionState}`);
+          
+          // Wait a moment and check if we received any realtime events
+          console.log('⏳ [SchemaChangeHandler] Waiting 1 second to see if realtime event arrives...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          console.log('🔍 [SchemaChangeHandler] If no realtime logs appeared above, the subscription may not be receiving events.');
 
           console.log('applyTableEdits - Change applied successfully');
           return result;
@@ -362,6 +504,22 @@ export class SchemaChangeHandlerService {
       );
     }
     console.log('applyTableEdits - All changes applied, updating schema_data');
+    
+    // Small delay to ensure realtime event is processed
+    // This helps if the subscription hasn't fully activated yet
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Reload project to get updated schema immediately
+    // The realtime subscription will also trigger, but this ensures immediate update
+    try {
+      console.log('🔄 [SchemaChangeHandler] Reloading project to get updated schema...');
+      await this.projectService.loadProject(projectId);
+      console.log('✅ [SchemaChangeHandler] Project reloaded successfully');
+    } catch (error: any) {
+      console.warn('⚠️ [SchemaChangeHandler] Failed to reload project, realtime will handle it:', error.message);
+      // Don't throw - realtime subscription will handle the update
+    }
+    
     console.log('=== applyTableEdits END (with DDL changes) ===');
   }
 

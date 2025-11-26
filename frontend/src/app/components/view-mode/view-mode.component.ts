@@ -1,8 +1,8 @@
-import { Component, OnInit, signal, DestroyRef, inject } from '@angular/core';
+import { Component, OnInit, signal, DestroyRef, inject, effect } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { MatTabsModule } from '@angular/material/tabs';
+import { MatTabsModule, MatTabChangeEvent } from '@angular/material/tabs';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -27,6 +27,7 @@ import { DataChangeEvent } from '../../services/table-data.service';
 import { BadgeComponent } from '../design-system/badge/badge.component';
 import { EmptyStateComponent } from '../design-system/empty-state/empty-state.component';
 import { LoadingSpinnerComponent } from '../design-system/loading-spinner/loading-spinner.component';
+import { RealtimeTableDataService } from '../../services/realtime-table-data.service';
 
 @Component({
   selector: 'app-view-mode',
@@ -72,8 +73,12 @@ import { LoadingSpinnerComponent } from '../design-system/loading-spinner/loadin
 
         @if (!isLoading() && tables().length > 0) {
         <div class="tables-container">
-          <mat-tab-group class="tables-tabs" animationDuration="300ms">
-            @for (table of tables(); track table.id) {
+          <mat-tab-group 
+            class="tables-tabs" 
+            animationDuration="300ms"
+            [selectedIndex]="selectedTabIndex()"
+            (selectedTabChange)="onTabChange($event)">
+            @for (table of tables(); track table.id; let i = $index) {
             <mat-tab [label]="table.name">
               <ng-template mat-tab-label>
                 <div class="tab-label">
@@ -86,6 +91,7 @@ import { LoadingSpinnerComponent } from '../design-system/loading-spinner/loadin
               <div class="tab-content">
                 <app-table-view 
                   [table]="table"
+                  [isActive]="selectedTabIndex() === i"
                   [relationships]="getTableRelationships(table.id)"
                   [relationshipDisplayColumns]="getRelationshipDisplayColumns(table.id)"
                   [allTables]="tables()"
@@ -219,6 +225,7 @@ export class ViewModeComponent implements OnInit {
   isLoading = signal<boolean>(true);
   tableViews = signal<{ [tableId: string]: TableView[] }>({});
   activeViews = signal<{ [tableId: string]: string }>({});
+  selectedTabIndex = signal<number>(0); // Track which tab is currently active
 
   private destroyRef = inject(DestroyRef);
   private handleViewModeActionBound: EventListener;
@@ -234,7 +241,8 @@ export class ViewModeComponent implements OnInit {
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
     private route: ActivatedRoute,
-    private router: Router
+    private router: Router,
+    private realtimeTableDataService: RealtimeTableDataService
   ) {
     // Bind event handler once
     this.handleViewModeActionBound = this.handleViewModeAction.bind(this) as EventListener;
@@ -248,6 +256,37 @@ export class ViewModeComponent implements OnInit {
     window.addEventListener('view-mode-action', this.handleViewModeActionBound);
     this.destroyRef.onDestroy(() => {
       window.removeEventListener('view-mode-action', this.handleViewModeActionBound);
+      
+      // Cleanup: Unsubscribe from all tables when component is destroyed
+      const currentTables = this.tables();
+      currentTables.forEach(table => {
+        console.log(`🔌 [ViewMode] Cleaning up subscription for table ${table.name} (${table.id}) on component destroy`);
+        this.realtimeTableDataService.unsubscribeFromTable(table.id);
+      });
+      
+      // Unsubscribe from schema changes
+      const projectId = this.route.snapshot.paramMap.get('projectId');
+      if (projectId) {
+        console.log(`🔌 [ViewMode] Unsubscribing from schema changes for project ${projectId}`);
+        this.realtimeTableDataService.unsubscribeFromSchemaChanges(projectId);
+      }
+    });
+    
+    // Listen to project changes from ProjectService (backup to realtime)
+    // This ensures we update immediately when project is reloaded after schema changes
+    effect(() => {
+      const currentProject = this.projectService.getCurrentProjectSync();
+      if (currentProject) {
+        const projectId = this.route.snapshot.paramMap.get('projectId');
+        // Only update if it's the same project
+        if (projectId && currentProject.id === projectId) {
+          console.log('🔄 [ViewMode] Project updated in ProjectService, refreshing view...');
+          this.tables.set(currentProject.schemaData.tables || []);
+          this.relationships.set(currentProject.schemaData.relationships || []);
+          this.relationshipDisplayColumns.set(currentProject.schemaData.relationshipDisplayColumns || []);
+          this.projectName.set(currentProject.name);
+        }
+      }
     });
     
     // Update shared toolbar with current data
@@ -307,6 +346,20 @@ export class ViewModeComponent implements OnInit {
       // Data will be loaded by each table-view component via realtime subscriptions
       // No need to load all data upfront
 
+      // Subscribe to schema changes for this project
+      // Wait for subscription to be active before continuing
+      try {
+        await this.realtimeTableDataService.subscribeToSchemaChanges(projectId, (affectedTableId) => {
+          console.log(`🔄 [ViewMode] Schema change detected for table ${affectedTableId}, reloading project...`);
+          // Reload project to get updated schema
+          this.loadProjectData();
+        });
+        console.log(`✅ [ViewMode] Schema changes subscription is active for project ${projectId}`);
+      } catch (error: any) {
+        console.error(`❌ [ViewMode] Failed to subscribe to schema changes:`, error);
+        // Continue anyway - the manual reload will still work
+      }
+
       this.isLoading.set(false);
     } catch (error) {
       console.error('Error loading project data:', error);
@@ -337,6 +390,7 @@ export class ViewModeComponent implements OnInit {
   }
 
   onDataChanged(event: DataChangeEvent) {
+    console.log('📥 [ViewMode] onDataChanged received:', event);
     switch (event.type) {
       case 'CREATE':
         this.handleCreateRecord(event);
@@ -345,11 +399,14 @@ export class ViewModeComponent implements OnInit {
         this.handleUpdateRecord(event);
         break;
       case 'DELETE':
+        console.log('🗑️ [ViewMode] Routing to handleDeleteRecord');
         this.handleDeleteRecord(event);
         break;
       case 'SCHEMA_UPDATE':
         this.handleSchemaUpdate(event);
         break;
+      default:
+        console.warn('⚠️ [ViewMode] Unknown event type:', event.type);
     }
   }
 
@@ -376,6 +433,25 @@ export class ViewModeComponent implements OnInit {
       if (result.success) {
         const recordId = result.data?.id || 'new record';
         this.notificationService.showSuccess(`✓ Record added successfully to ${event.table}`);
+        
+        // Fallback: manually reload table data if realtime event doesn't arrive
+        // Wait a bit to see if realtime event arrives, then reload if needed
+        setTimeout(async () => {
+          const tableId = table.id;
+          const dataSignal = this.realtimeTableDataService.getTableDataSignal(tableId);
+          if (dataSignal) {
+            // Check if the record was already added by realtime
+            const currentData = dataSignal();
+            const recordExists = currentData.some((record: any) => record.id === recordId);
+            
+            if (!recordExists) {
+              console.log(`🔄 [ViewMode] Record not found after insert, manually reloading...`);
+              await this.realtimeTableDataService.reloadTableData(tableId);
+            } else {
+              console.log(`✅ [ViewMode] Record was added by realtime, no manual reload needed`);
+            }
+          }
+        }, 1000); // Wait 1 second for realtime event
       } else {
         this.notificationService.showError(`Failed to add record: ${result.error || 'Unknown error'}`);
       }
@@ -407,6 +483,30 @@ export class ViewModeComponent implements OnInit {
 
       if (result.success) {
         this.notificationService.showSuccess(`Record updated in ${event.table}`);
+        
+        // Fallback: manually reload table data if realtime event doesn't arrive
+        // Wait a bit to see if realtime event arrives, then reload if needed
+        setTimeout(async () => {
+          const tableId = table.id;
+          const dataSignal = this.realtimeTableDataService.getTableDataSignal(tableId);
+          if (dataSignal && event.id) {
+            // Check if the record was already updated by realtime
+            const currentData = dataSignal();
+            const record = currentData.find((r: any) => r.id === event.id);
+            
+            // Check if the record matches the updated values
+            const wasUpdated = record && Object.keys(event.data).every(key => {
+              return record[key] === event.data[key];
+            });
+            
+            if (!wasUpdated) {
+              console.log(`🔄 [ViewMode] Record not updated by realtime, manually reloading...`);
+              await this.realtimeTableDataService.reloadTableData(tableId);
+            } else {
+              console.log(`✅ [ViewMode] Record was updated by realtime, no manual reload needed`);
+            }
+          }
+        }, 1000); // Wait 1 second for realtime event
       } else {
         this.notificationService.showError(`Failed to update record: ${result.error}`);
       }
@@ -417,16 +517,34 @@ export class ViewModeComponent implements OnInit {
   }
 
   private async handleDeleteRecord(event: DataChangeEvent) {
+    console.log('🗑️ [ViewMode] handleDeleteRecord called:', event);
     // Realtime subscription will handle removing the record automatically
     try {
       const project = this.projectService.getCurrentProjectSync();
-      if (!project) return;
-
-      const table = this.tables().find(t => t.name === event.table);
-      if (!table || !event.id) {
-        this.notificationService.showError(`Table or record ID not found`);
+      if (!project) {
+        console.error('❌ [ViewMode] No project found');
         return;
       }
+
+      console.log('🔍 [ViewMode] Looking for table:', event.table);
+      const table = this.tables().find(t => t.name === event.table);
+      if (!table) {
+        console.error('❌ [ViewMode] Table not found:', event.table);
+        this.notificationService.showError(`Table ${event.table} not found`);
+        return;
+      }
+
+      if (!event.id) {
+        console.error('❌ [ViewMode] Record ID not found in event:', event);
+        this.notificationService.showError(`Record ID not found`);
+        return;
+      }
+
+      console.log('🗑️ [ViewMode] Calling deleteRecord:', {
+        organizationId: project.organizationId,
+        tableName: table.name,
+        recordId: event.id
+      });
 
       // Delete from Slave database - realtime will update the table automatically
       const result = await this.slaveDataService.deleteRecord(
@@ -435,13 +553,35 @@ export class ViewModeComponent implements OnInit {
         event.id
       );
 
+      console.log('📊 [ViewMode] Delete result:', result);
+
       if (result.success) {
         this.notificationService.showSuccess(`Record deleted from ${event.table}`);
+        
+        // Fallback: manually reload table data if realtime event doesn't arrive
+        // Wait a bit to see if realtime event arrives, then reload if needed
+        setTimeout(async () => {
+          const tableId = table.id;
+          const dataSignal = this.realtimeTableDataService.getTableDataSignal(tableId);
+          if (dataSignal) {
+            // Check if the record was already removed by realtime
+            const currentData = dataSignal();
+            const recordStillExists = currentData.some((record: any) => record.id === event.id);
+            
+            if (recordStillExists) {
+              console.log(`🔄 [ViewMode] Record still exists after delete, manually reloading...`);
+              await this.realtimeTableDataService.reloadTableData(tableId);
+            } else {
+              console.log(`✅ [ViewMode] Record was removed by realtime, no manual reload needed`);
+            }
+          }
+        }, 1000); // Wait 1 second for realtime event
       } else {
+        console.error('❌ [ViewMode] Delete failed:', result.error);
         this.notificationService.showError(`Failed to delete record: ${result.error}`);
       }
     } catch (error: any) {
-      console.error('Error deleting record:', error);
+      console.error('💥 [ViewMode] Exception deleting record:', error);
       this.notificationService.showError(`Error deleting record: ${error.message}`);
     }
   }
@@ -624,6 +764,37 @@ export class ViewModeComponent implements OnInit {
   // TrackBy function to ensure proper table rendering order
   trackByTableId(index: number, table: Table): string {
     return table.id;
+  }
+
+  /**
+   * Handle tab change event
+   * Unsubscribe from previous table and let the new active table subscribe
+   */
+  onTabChange(event: MatTabChangeEvent): void {
+    const previousIndex = this.selectedTabIndex();
+    const newIndex = event.index;
+    
+    console.log(`🔄 [ViewMode] Tab changed from ${previousIndex} to ${newIndex}`);
+    
+    // Unsubscribe from previous table if it exists
+    if (previousIndex >= 0 && previousIndex < this.tables().length) {
+      const previousTable = this.tables()[previousIndex];
+      if (previousTable) {
+        console.log(`🔌 [ViewMode] Unsubscribing from table ${previousTable.name} (${previousTable.id})`);
+        this.realtimeTableDataService.unsubscribeFromTable(previousTable.id);
+      }
+    }
+    
+    // Update selected tab index
+    this.selectedTabIndex.set(newIndex);
+    
+    // The new active table-view component will subscribe automatically via isActive prop
+    if (newIndex >= 0 && newIndex < this.tables().length) {
+      const newTable = this.tables()[newIndex];
+      if (newTable) {
+        console.log(`📡 [ViewMode] Tab ${newTable.name} (${newTable.id}) is now active - will subscribe`);
+      }
+    }
   }
 
   exportSchema() {

@@ -53,7 +53,7 @@ import { TableEditService } from '../../services/table-edit.service';
         <mat-form-field *ngIf="isSelectField" appearance="outline" class="cell-select">
           <mat-select [value]="editingValue" 
                       (selectionChange)="onValueChange($event.value)"
-                      (closed)="onSave()">
+                      (closed)="isTemporaryRow ? null : onSave()">
             <mat-option *ngFor="let option of selectOptions" [value]="option.value">
               {{ option.label }}
             </mat-option>
@@ -64,7 +64,7 @@ import { TableEditService } from '../../services/table-edit.service';
         <mat-checkbox *ngIf="isCheckboxField"
                       [checked]="editingValue === 'true'"
                       (change)="onValueChange($event.checked.toString())"
-                      (blur)="onSave()">
+                      (blur)="isTemporaryRow ? null : onSave()">
         </mat-checkbox>
       </div>
     </div>
@@ -504,6 +504,7 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
   private originalValue: any = null; // Track original value when editing starts
   private currentEditingValue: string = ''; // Track current value being edited
   private isHandlingBlur = false; // Flag to prevent multiple blur handlers
+  private isTabNavigation = false; // Flag to indicate Tab key was pressed (prevents blur handling)
 
   get displayValue(): string {
     return this.formatValue(this.value);
@@ -588,9 +589,44 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
     }
   }
 
+  /**
+   * Find the parent table row element (tr) for this cell
+   */
+  private getParentRowElement(): HTMLElement | null {
+    let element: HTMLElement | null = this.elementRef.nativeElement;
+    while (element && element.tagName !== 'TR') {
+      element = element.parentElement;
+    }
+    return element;
+  }
+
+  /**
+   * Check if a target element is within the same row as this cell
+   */
+  private isTargetInSameRow(target: HTMLElement): boolean {
+    const rowElement = this.getParentRowElement();
+    if (!rowElement) return false;
+    return rowElement.contains(target);
+  }
+
+  /**
+   * Check if a target element is another cell in the same row
+   */
+  private isTargetAnotherCellInRow(target: HTMLElement): boolean {
+    const rowElement = this.getParentRowElement();
+    if (!rowElement) return false;
+    
+    // Check if target is within the row but not within this cell
+    if (rowElement.contains(target)) {
+      const nativeElement = this.elementRef.nativeElement;
+      return !nativeElement.contains(target);
+    }
+    return false;
+  }
+
   private documentClickHandler = (event: MouseEvent) => {
-    // Only handle if we're editing this cell
-    if (!this.isEditing || this.shouldAlwaysEdit || this.isHandlingBlur) {
+    // Only handle if we're editing this cell (not temporary rows)
+    if (!this.isEditing || this.shouldAlwaysEdit || this.isHandlingBlur || this.isTabNavigation) {
       return;
     }
 
@@ -600,14 +636,24 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
     
     // Check if the click target is inside this cell's DOM element
     if (nativeElement && !nativeElement.contains(target)) {
-      // Click is outside this cell, handle blur
-      // Use setTimeout to ensure this runs after any other click handlers
-      setTimeout(() => {
-        if (this.isEditing && !this.isHandlingBlur) {
-          this.isHandlingBlur = true;
-          this.handleBlurLogic();
-        }
-      }, 100);
+      // Check if target is in the same row (another cell)
+      if (this.isTargetAnotherCellInRow(target)) {
+        // Click is on another cell in the same row - cancel editing completely
+        setTimeout(() => {
+          if (this.isEditing && !this.isHandlingBlur) {
+            this.isHandlingBlur = true;
+            this.onCancel(); // Cancel editing when clicking another cell in same row
+          }
+        }, 100);
+      } else if (!this.isTargetInSameRow(target)) {
+        // Click is outside the row - handle blur (save or cancel based on value)
+        setTimeout(() => {
+          if (this.isEditing && !this.isHandlingBlur) {
+            this.isHandlingBlur = true;
+            this.handleBlurLogic();
+          }
+        }, 100);
+      }
     }
   };
 
@@ -731,21 +777,29 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   onSave() {
-    // For always-editing mode, ensure the value is saved to the record first
-    if (this.shouldAlwaysEdit) {
+    // For temporary rows (always-editing mode), update value in record but don't emit save
+    // Save should only happen via explicit "Save" button click
+    if (this.shouldAlwaysEdit || this.isTemporaryRow) {
       // Get the current value from the input if available, otherwise use value prop
-      const inputElement = document.querySelector(
-        `tr[mat-row].temporary-row td[mat-cell] app-table-cell[ng-reflect-column-name="${this.columnName}"] input`
-      ) as HTMLInputElement;
-      
       let currentValue = this.value || '';
-      if (inputElement) {
-        currentValue = inputElement.value || currentValue;
+      if (this.inputComponent) {
+        currentValue = this.inputComponent.internalValue() || currentValue;
+      } else {
+        const inputElement = document.querySelector(
+          `tr[mat-row].temporary-row td[mat-cell] app-table-cell[ng-reflect-column-name="${this.columnName}"] input`
+        ) as HTMLInputElement;
+        if (inputElement) {
+          currentValue = inputElement.value || currentValue;
+        }
       }
       
       // Emit value change to ensure the value is saved to the record
       this.valueChange.emit({ value: currentValue, columnName: this.columnName, rowIndex: this.rowIndex });
+      // Don't emit save for temporary rows - only Save button should trigger save
+      return;
     }
+    
+    // For existing records, emit save event
     this.save.emit();
   }
 
@@ -756,27 +810,51 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   onBlur(event?: any) {
-    // Only handle blur for non-temporary rows (regular editing mode)
-    // Temporary rows handle their own auto-save
-    if (this.shouldAlwaysEdit) {
-      return; // Skip blur handling for always-editing mode
+    // Skip blur handling for temporary rows (always-editing mode)
+    // Temporary rows should only save via explicit "Save" button
+    if (this.shouldAlwaysEdit || this.isTemporaryRow) {
+      return; // Skip blur handling for temporary rows
+    }
+
+    // Skip blur if Tab navigation is in progress
+    if (this.isTabNavigation) {
+      this.isTabNavigation = false; // Reset flag
+      return;
     }
 
     if (!this.isEditing || this.isHandlingBlur) {
       return; // Not currently editing or already handling
     }
 
-    // Use setTimeout to ensure we get the latest value after blur event completes
-    // This also allows the valueChange event to update currentEditingValue first
-    setTimeout(() => {
-      // Double-check we're still editing (might have been cancelled by another event)
-      if (!this.isEditing || this.isHandlingBlur) {
-        return;
-      }
+    // Get the related target (element receiving focus)
+    const relatedTarget = event?.relatedTarget as HTMLElement;
+    
+    // Check if blur is to another cell in the same row
+    if (relatedTarget && this.isTargetAnotherCellInRow(relatedTarget)) {
+      // Blur to another cell in same row - cancel editing completely
+      setTimeout(() => {
+        if (this.isEditing && !this.isHandlingBlur) {
+          this.isHandlingBlur = true;
+          this.onCancel(); // Cancel editing when moving to another cell in same row
+        }
+      }, 100);
+      return;
+    }
 
-      this.isHandlingBlur = true;
-      this.handleBlurLogic();
-    }, 200); // Small delay to ensure valueChange has been processed
+    // Check if blur is to an element outside the row
+    if (relatedTarget && !this.isTargetInSameRow(relatedTarget)) {
+      // Blur is outside the row - handle blur (save or cancel based on value)
+      setTimeout(() => {
+        if (this.isEditing && !this.isHandlingBlur) {
+          this.isHandlingBlur = true;
+          this.handleBlurLogic();
+        }
+      }, 200); // Small delay to ensure valueChange has been processed
+      return;
+    }
+
+    // If no related target or unclear, use document click handler logic
+    // This will be handled by documentClickHandler
   }
 
   private areValuesEqual(val1: any, val2: any): boolean {
@@ -790,7 +868,25 @@ export class TableCellComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   onTab() {
-    // Save current edit and move to next field
+    // Set flag to prevent blur handling
+    this.isTabNavigation = true;
+    
+    // For temporary rows, just move to next field without saving
+    if (this.isTemporaryRow || this.shouldAlwaysEdit) {
+      // Update value in record but don't save
+      if (this.inputComponent) {
+        const currentValue = this.inputComponent.internalValue() || '';
+        this.onValueChange(currentValue);
+      }
+      // Move to next field
+      this.tabNext.emit({
+        rowIndex: this.rowIndex,
+        columnName: this.columnName
+      });
+      return;
+    }
+    
+    // For existing records, save current edit and move to next field
     this.save.emit();
     this.tabNext.emit({
       rowIndex: this.rowIndex,

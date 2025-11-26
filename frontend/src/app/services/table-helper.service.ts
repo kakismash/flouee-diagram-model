@@ -24,10 +24,12 @@ export class TableHelperService {
         return table;
       }
       
+      // ✅ Generate ID once and use it consistently for both id and internal_name
+      const idColumnId = this.generateId();
       const idColumn: TableColumn = {
-        id: this.generateId(),
+        id: idColumnId,
         name: 'id',
-        internal_name: `c_${this.generateId()}`, // ✅ Generate internal_name for system column
+        internal_name: `c_${idColumnId}`, // ✅ Use same ID for internal_name
         type: 'UUID',
         isPrimaryKey: true,
         isNullable: false,

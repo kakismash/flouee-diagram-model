@@ -3,6 +3,7 @@ export interface SchemaChange {
         'add_unique_constraint' | 'drop_unique_constraint' | 'alter_column_default' | 'alter_column_nullable' |
         'rename_column' | 'alter_column_type';
   table?: any;
+  table_id?: string; // Table ID for easier lookup in realtime handler
   table_name?: string;
   column?: any;
   column_name?: string;

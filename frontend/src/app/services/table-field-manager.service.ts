@@ -31,10 +31,12 @@ export class TableFieldManagerService {
     }
 
     // Create new column
+    // ✅ Generate ID once and use it consistently for both id and internal_name
+    const columnId = this.generateId();
     const newColumn: TableColumn = {
-      id: this.generateId(),
+      id: columnId,
       name: result.fieldName,
-      internal_name: `c_${this.generateId()}`,
+      internal_name: `c_${columnId}`, // ✅ Use same ID for internal_name
       type: result.fieldType,
       isPrimaryKey: false,
       isNullable: result.isNullable ?? true,
@@ -75,8 +77,16 @@ export class TableFieldManagerService {
     }
   }
 
+  /**
+   * Generate a unique ID for a column
+   * Uses timestamp + random string to ensure uniqueness
+   * This ID is used for both the column's `id` and `internal_name` (with `c_` prefix)
+   */
   private generateId(): string {
-    return Math.random().toString(36).substr(2, 9);
+    // Use timestamp + random string for better uniqueness
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 11);
+    return `${timestamp}_${random}`;
   }
 }
 

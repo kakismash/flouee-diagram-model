@@ -3,7 +3,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-id',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+  'Access-Control-Max-Age': '86400'
 };
 
 // ============================================
@@ -158,6 +159,10 @@ function normalizeAndValidateChange(change: any): ChangeValidationResult {
       case 'add_column':
         normalized.table_name = change.table_name || change.data?.table_name;
         normalized.column = change.column || change.data?.column;
+        // Preserve table_id if present (used by realtime handler)
+        if (change.table_id) {
+          normalized.table_id = change.table_id;
+        }
         if (!normalized.table_name || !normalized.column) {
           return { valid: false, error: 'Table name and column required for add_column' };
         }
@@ -169,6 +174,10 @@ function normalizeAndValidateChange(change: any): ChangeValidationResult {
           change.column_name ||
           change.data?.column_name ||
           (change.column?.internal_name || (change.column?.id ? `c_${change.column.id}` : null));
+        // Preserve table_id if present (used by realtime handler)
+        if (change.table_id) {
+          normalized.table_id = change.table_id;
+        }
         if (!normalized.table_name || !normalized.column_name) {
           return { valid: false, error: 'Table name and column name required for drop_column' };
         }
@@ -233,6 +242,22 @@ function normalizeAndValidateChange(change: any): ChangeValidationResult {
         }
         break;
 
+      case 'alter_column_type':
+        normalized.table_name = change.table_name || change.data?.table_name;
+        normalized.column_name =
+          change.column_name ||
+          change.data?.column_name ||
+          (change.column?.internal_name || (change.column?.id ? `c_${change.column.id}` : null));
+        normalized.new_type = change.new_type || change.data?.new_type;
+        // Preserve table_id if present (used by realtime handler)
+        if (change.table_id) {
+          normalized.table_id = change.table_id;
+        }
+        if (!normalized.table_name || !normalized.column_name || !normalized.new_type) {
+          return { valid: false, error: 'Table name, column name, and new type required for alter_column_type' };
+        }
+        break;
+
       default:
         return { valid: false, error: `Unsupported change type: ${type}` };
     }
@@ -252,15 +277,26 @@ function getSchemaName(organizationId: string): string {
 }
 
 Deno.serve(async (req) => {
-  // Handle CORS preflight requests
+  // Handle CORS preflight requests FIRST - before any async operations
   if (req.method === 'OPTIONS') {
-    return new Response('ok', {
+    return new Response(null, {
+      status: 204,
       headers: corsHeaders
     });
   }
 
   try {
+    console.log('🚀 [apply-schema-change-atomic] Request received');
+    const requestStartTime = Date.now();
+    
     const { organization_id, project_id, change, new_schema_data, current_version, user_id } = await req.json();
+    console.log('📥 [apply-schema-change-atomic] Request parsed:', {
+      organization_id,
+      project_id,
+      changeType: change?.type,
+      current_version,
+      hasUser: !!user_id
+    });
 
     // Validate required fields
     if (!organization_id || !project_id || !change || !new_schema_data || current_version === undefined) {
@@ -564,16 +600,140 @@ Deno.serve(async (req) => {
         slaveConfig.supabase_service_role_key || slaveConfig.supabase_anon_key
       );
 
+      console.log(`🔧 [apply-schema-change-atomic] Applying change to Slave: ${slaveConfig.supabase_project_url}`);
+      console.log(`🔧 [apply-schema-change-atomic] Schema: ${schemaName}`);
+      console.log(`🔧 [apply-schema-change-atomic] Generated SQL:`, sql);
+
       // Ensure schema exists
-      await slaveClient.rpc('exec_sql', {
+      console.log(`🔧 [apply-schema-change-atomic] Creating schema if not exists...`);
+      const schemaStartTime = Date.now();
+      
+      // Add timeout wrapper for exec_sql (30 seconds max)
+      const schemaTimeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Schema creation timeout after 30 seconds')), 30000);
+      });
+      
+      const schemaPromise = slaveClient.rpc('exec_sql', {
         query: `CREATE SCHEMA IF NOT EXISTS ${schemaName};`
       });
+      
+      const { error: schemaError } = await Promise.race([schemaPromise, schemaTimeoutPromise]) as any;
+      const schemaDuration = Date.now() - schemaStartTime;
+      console.log(`⏱️ [apply-schema-change-atomic] Schema creation took ${schemaDuration}ms`);
+      
+      if (schemaError) {
+        console.error(`❌ [apply-schema-change-atomic] Failed to create schema:`, schemaError);
+        throw new Error(`Failed to create schema: ${schemaError.message}`);
+      }
+      console.log(`✅ [apply-schema-change-atomic] Schema created/verified`);
 
       // Apply the SQL change
-      const sqlStatements = sql.split(';').filter(s => s.trim().length > 0);
-      for (const statement of sqlStatements) {
-        if (statement.trim()) {
-          await slaveClient.rpc('exec_sql', { query: statement.trim() + ';' });
+      console.log(`🔧 [apply-schema-change-atomic] Splitting SQL into statements...`);
+      const sqlStatements = sql.split(';').filter(s => s.trim().length > 0 && !s.trim().startsWith('--'));
+      console.log(`🔧 [apply-schema-change-atomic] Found ${sqlStatements.length} SQL statements (excluding comments)`);
+      
+      // If no SQL statements (e.g., no-op change), skip execution but still update schema_data
+      if (sqlStatements.length === 0) {
+        console.log(`ℹ️ [apply-schema-change-atomic] No SQL to execute (no-op change), skipping Slave DDL execution`);
+      }
+      
+      for (let i = 0; i < sqlStatements.length; i++) {
+        const statement = sqlStatements[i].trim();
+        if (statement && !statement.startsWith('--')) {
+          const finalStatement = statement + ';';
+          console.log(`🔧 [apply-schema-change-atomic] Executing statement ${i + 1}/${sqlStatements.length}:`, finalStatement);
+          
+          const statementStartTime = Date.now();
+          
+          // Add timeout wrapper for exec_sql (30 seconds max per statement)
+          const statementTimeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`Statement ${i + 1} timeout after 30 seconds`)), 30000);
+          });
+          
+          const statementPromise = slaveClient.rpc('exec_sql', { 
+            query: finalStatement 
+          });
+          
+          const { error: execError, data: execData } = await Promise.race([statementPromise, statementTimeoutPromise]) as any;
+          const statementDuration = Date.now() - statementStartTime;
+          console.log(`⏱️ [apply-schema-change-atomic] Statement ${i + 1} took ${statementDuration}ms`);
+          
+          if (execError) {
+            console.error(`❌ [apply-schema-change-atomic] Failed to execute statement ${i + 1}:`, execError);
+            console.error(`❌ [apply-schema-change-atomic] Statement was:`, finalStatement);
+            throw new Error(`Failed to execute SQL statement ${i + 1}: ${execError.message}`);
+          }
+          
+          console.log(`✅ [apply-schema-change-atomic] Statement ${i + 1} executed successfully`, execData ? `Result: ${JSON.stringify(execData)}` : '');
+        }
+      }
+
+      // If this is an add_column change, ensure the table is in realtime publication
+      // This ensures new columns are immediately available for realtime
+      if (normalizedChange.type === 'add_column') {
+        try {
+          console.log(`📡 [apply-schema-change-atomic] Ensuring table ${schemaName}.${normalizedChange.table_name} is in realtime publication...`);
+          
+          if (!slaveConfig.supabase_service_role_key) {
+            console.warn(`⚠️ Service role key not available, skipping realtime setup`);
+          } else {
+            const realtimeSlaveClient = createClient(
+              slaveConfig.supabase_project_url,
+              slaveConfig.supabase_service_role_key
+            );
+            
+            // Add timeout to prevent hanging (5 seconds max)
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Realtime setup timeout after 5 seconds')), 5000);
+            });
+            
+            const realtimePromise = realtimeSlaveClient.rpc('add_table_to_realtime', {
+              p_schema_name: schemaName,
+              p_table_name: normalizedChange.table_name
+            });
+            
+            await Promise.race([realtimePromise, timeoutPromise]);
+            console.log(`✅ Table ${schemaName}.${normalizedChange.table_name} added to realtime`);
+          }
+        } catch (realtimeError: any) {
+          // Log but don't fail - realtime is optional
+          console.warn(`⚠️ Failed to add table to realtime (non-fatal):`, realtimeError.message);
+        }
+      }
+
+      // If this is a create_table change, add the table to realtime publication
+      // Use service_role_key to ensure we have proper permissions
+      if (normalizedChange.type === 'create_table' && normalizedChange.table) {
+        const tableName = normalizedChange.table.internal_name || `t_${normalizedChange.table.id}`;
+        try {
+          console.log(`📡 Adding table ${schemaName}.${tableName} to realtime publication...`);
+          
+          // Ensure we're using service_role_key for this operation
+          if (!slaveConfig.supabase_service_role_key) {
+            console.warn(`⚠️ Service role key not available, skipping realtime setup`);
+          } else {
+            // Create a client with service_role_key specifically for this operation
+            const realtimeSlaveClient = createClient(
+              slaveConfig.supabase_project_url,
+              slaveConfig.supabase_service_role_key
+            );
+            
+            // Add timeout to prevent hanging (5 seconds max)
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Realtime setup timeout after 5 seconds')), 5000);
+            });
+            
+            const realtimePromise = realtimeSlaveClient.rpc('add_table_to_realtime', {
+              p_schema_name: schemaName,
+              p_table_name: tableName
+            });
+            
+            await Promise.race([realtimePromise, timeoutPromise]);
+            console.log(`✅ Table ${schemaName}.${tableName} added to realtime`);
+          }
+        } catch (realtimeError: any) {
+          // Log but don't fail - realtime is optional
+          console.warn(`⚠️ Failed to add table to realtime (non-fatal):`, realtimeError.message);
         }
       }
 
@@ -641,22 +801,60 @@ Deno.serve(async (req) => {
         }
 
     // 8. Log the change to schema_changes for audit
-    await masterClient
+    const insertStartTime = Date.now();
+    console.log(`📝 [apply-schema-change-atomic] Logging change to schema_changes:`, {
+      organization_id,
+      project_id,
+      change_type: normalizedChange.type,
+      table_id: normalizedChange.table_id,
+      change_data: normalizedChange,
+      timestamp: new Date().toISOString()
+    });
+    console.log(`📝 [apply-schema-change-atomic] Project ID for realtime filter: ${project_id}`);
+    console.log(`📝 [apply-schema-change-atomic] Expected filter: project_id=eq.${project_id}`);
+    
+    const insertPayload = {
+      organization_id,
+      project_id,
+      change_type: normalizedChange.type,
+      change_data: normalizedChange,
+      old_value: oldSchemaData,
+      new_value: new_schema_data,
+      status: 'applied',
+      sql_executed: sql,
+      applied_at: new Date().toISOString(),
+      created_by: user_id
+    };
+    
+    console.log(`📝 [apply-schema-change-atomic] Insert payload project_id: ${insertPayload.project_id}`);
+    
+    const { data: insertedData, error: insertError } = await masterClient
       .from('schema_changes')
-      .insert({
-        organization_id,
-        project_id,
-        change_type: normalizedChange.type,
-        change_data: normalizedChange,
-        old_value: oldSchemaData,
-        new_value: new_schema_data,
-        status: 'applied',
-        sql_executed: sql,
-        applied_at: new Date().toISOString(),
-        created_by: user_id
-      });
+      .insert(insertPayload)
+      .select()
+      .single();
 
-    console.log(`🎉 Atomic change completed successfully for project ${project_id}`);
+    const insertDuration = Date.now() - insertStartTime;
+    
+    if (insertError) {
+      console.error(`❌ [apply-schema-change-atomic] Failed to log change to schema_changes:`, insertError);
+      console.error(`❌ [apply-schema-change-atomic] Insert duration: ${insertDuration}ms`);
+      // Don't fail the entire operation if logging fails, but log the error
+    } else {
+      console.log(`✅ [apply-schema-change-atomic] Change logged to schema_changes successfully`);
+      console.log(`✅ [apply-schema-change-atomic] Insert duration: ${insertDuration}ms`);
+      console.log(`✅ [apply-schema-change-atomic] Inserted record ID: ${insertedData?.id}`);
+      console.log(`✅ [apply-schema-change-atomic] Inserted record project_id: ${insertedData?.project_id}`);
+      console.log(`✅ [apply-schema-change-atomic] This INSERT should trigger realtime event for project ${project_id}`);
+      console.log(`✅ [apply-schema-change-atomic] Realtime filter should match: project_id=eq.${project_id}`);
+      console.log(`✅ [apply-schema-change-atomic] Actual inserted project_id: ${insertedData?.project_id}`);
+      if (insertedData?.project_id !== project_id) {
+        console.error(`❌ [apply-schema-change-atomic] PROJECT_ID MISMATCH! Expected: ${project_id}, Got: ${insertedData?.project_id}`);
+      }
+    }
+
+    const totalDuration = Date.now() - requestStartTime;
+    console.log(`🎉 Atomic change completed successfully for project ${project_id} in ${totalDuration}ms`);
 
     return new Response(JSON.stringify({
       success: true,
@@ -736,6 +934,13 @@ function generateSQL(change: any, organizationId: string): string {
 
     case 'alter_column_nullable':
       if (!change.table_name || !change.column_name) throw new Error('Table and column required for alter_column_nullable');
+      // Check if this is a no-op (same value) - if so, return empty SQL
+      // The schema_data will still be updated, but no DDL will be executed
+      // This is used for cases like column reordering where only metadata changes
+      if (change.nullable === undefined || change.nullable === null) {
+        // If nullable is not specified, treat as no-op
+        return '-- No-op: nullable value unchanged';
+      }
       if (change.nullable) {
         return `ALTER TABLE ${schema}.${change.table_name} ALTER COLUMN ${change.column_name} DROP NOT NULL;`;
       } else {
@@ -840,9 +1045,23 @@ function generateCreateTableSQL(table: any, schema: string): string {
 function generateAddColumnSQL(tableName: string, column: any, schema: string): string {
   // ✅ Use internal_name for column if available, otherwise generate masked name
   const columnName = column.internal_name || `c_${column.id}`;
+  console.log(`🔧 [generateAddColumnSQL] Generating SQL for column:`, {
+    tableName,
+    schema,
+    columnName,
+    columnType: column.type,
+    nullable: column.nullable,
+    default_value: column.default_value,
+    isUnique: column.isUnique || column.unique
+  });
+  
   let sql = `ALTER TABLE ${schema}.${tableName} ADD COLUMN IF NOT EXISTS ${columnName} ${column.type}`;
-  if (column.nullable === false) sql += ' NOT NULL';
-  if (column.default_value) sql += ` DEFAULT ${column.default_value}`;
+  if (column.nullable === false || column.isNullable === false) {
+    sql += ' NOT NULL';
+  }
+  if (column.default_value || column.defaultValue) {
+    sql += ` DEFAULT ${column.default_value || column.defaultValue}`;
+  }
   sql += ';';
 
   // Add unique constraint if needed
@@ -852,6 +1071,7 @@ function generateAddColumnSQL(tableName: string, column: any, schema: string): s
     sql += `\nCREATE UNIQUE INDEX IF NOT EXISTS ${constraintName} ON ${schema}.${tableName} (${columnName});`;
   }
 
+  console.log(`🔧 [generateAddColumnSQL] Generated SQL:`, sql);
   return sql;
 }
 

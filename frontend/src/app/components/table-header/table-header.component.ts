@@ -78,6 +78,19 @@ import { TableEditService } from '../../services/table-edit.service';
             <mat-chip *ngIf="column.isAutoIncrement" class="badge ai">AI</mat-chip>
           </div>
         </div>
+        
+        <!-- Delete Button (only for non-id, non-primary-key columns) - positioned outside column-info -->
+        <button *ngIf="canDelete" 
+                mat-icon-button 
+                class="delete-column-btn"
+                (click)="onDeleteColumn($event)"
+                (mousedown)="$event.stopPropagation()"
+                matTooltip="Delete column"
+                matTooltipPosition="below"
+                type="button"
+                aria-label="Delete column">
+          <mat-icon>close</mat-icon>
+        </button>
       </div>
       <!-- Resize Handle -->
       <div class="resize-handle"
@@ -119,6 +132,9 @@ import { TableEditService } from '../../services/table-edit.service';
       align-items: center;
       gap: 8px;
       flex: 1;
+      min-width: 0; /* Allow flexbox shrinking */
+      overflow: hidden; /* Prevent content overflow */
+      position: relative;
     }
 
     .column-info {
@@ -127,6 +143,8 @@ import { TableEditService } from '../../services/table-edit.service';
       align-items: center;
       gap: 6px;
       flex: 1;
+      min-width: 0; /* Allow flexbox shrinking */
+      overflow: hidden; /* Prevent content overflow */
     }
 
     .column-name-editable {
@@ -335,12 +353,90 @@ import { TableEditService } from '../../services/table-edit.service';
     .column-header {
       position: relative;
     }
+
+    .delete-column-btn {
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      max-width: 18px;
+      padding: 0;
+      margin: 0;
+      margin-left: 6px;
+      opacity: 0;
+      transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+                  background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+                  transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      color: var(--theme-text-secondary, rgba(0, 0, 0, 0.6));
+      background-color: transparent;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 10;
+      overflow: hidden;
+    }
+
+    .column-header:hover .delete-column-btn {
+      opacity: 0.5;
+    }
+
+    .delete-column-btn:hover {
+      opacity: 1 !important;
+      background-color: var(--theme-error-container, rgba(211, 47, 47, 0.1));
+      color: var(--theme-error, #d32f2f);
+    }
+
+    .delete-column-btn:active {
+      transform: scale(0.85);
+      background-color: var(--theme-error-container, rgba(211, 47, 47, 0.18));
+    }
+
+    .delete-column-btn mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+      line-height: 14px;
+      font-weight: 400;
+    }
+
+    /* Ensure button doesn't interfere with drag */
+    .column-header.cdk-drag-dragging .delete-column-btn,
+    .column-header.cdk-drag-placeholder .delete-column-btn {
+      display: none;
+    }
+
+    /* Hide button when resizing */
+    .column-header:has(.resize-handle.resizing) .delete-column-btn {
+      opacity: 0 !important;
+      pointer-events: none;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .delete-column-btn {
+        width: 20px;
+        height: 20px;
+        min-width: 20px;
+        max-width: 20px;
+      }
+
+      .delete-column-btn mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+      }
+    }
   `]
 })
 export class TableHeaderComponent implements AfterViewInit {
   @Input() column: any;
   @Input() canDrag = false;
   @Input() isEditingColumnName = false;
+  @Input() canDelete = false; // Allow deleting column (not id, not primary key)
   @Input() set editingColumnNameValue(value: string) {
     // Only update if we're not currently editing (to avoid overwriting user input)
     if (!this.isEditingColumnName) {
@@ -361,6 +457,7 @@ export class TableHeaderComponent implements AfterViewInit {
   @Output() saveColumnName = new EventEmitter<{columnId: string, newName: string}>();
   @Output() cancelEditColumnName = new EventEmitter<void>();
   @Output() columnResized = new EventEmitter<{columnId: string, width: number}>();
+  @Output() deleteColumn = new EventEmitter<{columnId: string, columnName: string}>();
 
   isResizing = false;
   private startX = 0;
@@ -636,6 +733,20 @@ export class TableHeaderComponent implements AfterViewInit {
     }
 
     return this.calculateTextWidth(this.column.name);
+  }
+
+  onDeleteColumn(event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!this.column) {
+      return;
+    }
+
+    this.deleteColumn.emit({
+      columnId: this.column.id,
+      columnName: this.column.name || 'this column'
+    });
   }
 }
 

@@ -44,21 +44,79 @@ export class EventDrivenSchemaService {
       }
 
       // Call the Edge Function with bounded retries for 409 conflicts
+      // Use a mutable variable for currentVersion so we can update it on retry
+      let mutableCurrentVersion = currentVersion;
       const invokeWithRetry = async (maxAttempts = 3): Promise<{ data: any; error: any } > => {
         let attempt = 0;
         let lastError: any = null;
         let lastData: any = null;
         
         while (attempt < maxAttempts) {
-          const { data, error } = await this.supabase.client.functions.invoke('apply-schema-change-atomic', {
+          // ALWAYS reload project version just before each attempt to ensure we have the latest
+          // This prevents version conflicts when the project is being updated by other processes
+          try {
+            const { data: latestProject } = await this.supabase.client
+              .from('projects')
+              .select('version')
+              .eq('id', projectId)
+              .single();
+            
+            if (latestProject && latestProject.version !== mutableCurrentVersion) {
+              console.log(`🔄 [EventDrivenSchema] Version changed before attempt ${attempt + 1}: ${mutableCurrentVersion} -> ${latestProject.version}`);
+              mutableCurrentVersion = latestProject.version;
+            }
+          } catch (reloadError: any) {
+            console.warn(`⚠️ [EventDrivenSchema] Failed to reload project version before attempt ${attempt + 1}:`, reloadError.message);
+            // Continue with current version
+          }
+          
+          console.log(`🔄 [EventDrivenSchema] Calling apply-schema-change-atomic (attempt ${attempt + 1}/${maxAttempts}):`, {
+            projectId,
+            changeType: change.type,
+            currentVersion: mutableCurrentVersion
+          });
+          
+          // Add timeout wrapper (60 seconds max per attempt)
+          const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) => {
+            setTimeout(() => {
+              reject(new Error('Edge Function timeout: Request took longer than 60 seconds'));
+            }, 60000);
+          });
+          
+          const invokePromise = this.supabase.client.functions.invoke('apply-schema-change-atomic', {
             body: {
               organization_id: project.organization_id,
               project_id: projectId,
               change: change,
               new_schema_data: newSchemaData,
-              current_version: currentVersion,
+              current_version: mutableCurrentVersion,
               user_id: user.id
             }
+          });
+          
+          let invokeResult: { data: any; error: any };
+          try {
+            invokeResult = await Promise.race([invokePromise, timeoutPromise]);
+          } catch (timeoutError: any) {
+            console.error(`⏱️ [EventDrivenSchema] Request timeout (attempt ${attempt + 1}):`, timeoutError.message);
+            lastError = {
+              message: `Edge Function timeout: The request took longer than 60 seconds. This usually means the Edge Function is hanging. Check Edge Function logs for details.`,
+              originalError: timeoutError.message
+            };
+            // Don't retry on timeout - it's likely a real issue with the Edge Function
+            break;
+          }
+          
+          const { data, error } = invokeResult;
+          
+          console.log(`📥 [EventDrivenSchema] Response (attempt ${attempt + 1}):`, {
+            hasError: !!error,
+            hasData: !!data,
+            success: data?.success,
+            error: error?.message || data?.error,
+            currentVersion: mutableCurrentVersion,
+            expectedVersion: data?.expected_version,
+            actualVersion: data?.current_version
           });
           
           // Check if successful (no error AND data.success === true)
@@ -86,9 +144,30 @@ export class EventDrivenSchemaService {
                               lastData.error.includes('update failed')));
           
           if (isConflict && attempt < maxAttempts - 1) {
-            console.log(`⚠️ Conflict detected (attempt ${attempt + 1}/${maxAttempts}), retrying immediately...`);
-            // No delay needed - if conflict is real, immediate retry will handle it
-            // If conflict is transient (optimistic locking), immediate retry may succeed
+            console.log(`⚠️ Conflict detected (attempt ${attempt + 1}/${maxAttempts}), reloading project and retrying...`);
+            
+            // Reload project to get the latest version before retrying
+            // Add a small delay to allow any pending updates to complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            try {
+              const { data: updatedProject } = await this.supabase.client
+                .from('projects')
+                .select('version')
+                .eq('id', projectId)
+                .single();
+              
+              if (updatedProject) {
+                if (updatedProject.version !== mutableCurrentVersion) {
+                  console.log(`🔄 [EventDrivenSchema] Version updated after conflict: ${mutableCurrentVersion} -> ${updatedProject.version}`);
+                }
+                mutableCurrentVersion = updatedProject.version;
+              }
+            } catch (reloadError: any) {
+              console.warn(`⚠️ [EventDrivenSchema] Failed to reload project version:`, reloadError.message);
+              // Continue with retry anyway
+            }
+            
             attempt++;
             continue;
           }
@@ -106,17 +185,34 @@ export class EventDrivenSchemaService {
       const { data, error } = await invokeWithRetry(3);
 
       if (error) {
+        console.error('❌ [EventDrivenSchema] Edge Function error:', {
+          error,
+          message: error.message,
+          status: (error as any)?.status,
+          context: (error as any)?.context
+        });
         throw new Error(error.message || 'Unknown error occurred');
       }
 
       if (!data || !data.success) {
         // Check if it's a version conflict
         const errorMessage = data?.error || 'Failed to apply schema change';
+        console.error('❌ [EventDrivenSchema] Schema change failed:', {
+          success: data?.success,
+          error: errorMessage,
+          data: data
+        });
         if (errorMessage.includes('Version conflict') || errorMessage.includes('modified by another user')) {
           throw new Error(`VERSION_CONFLICT: ${errorMessage}`);
         }
         throw new Error(errorMessage);
       }
+
+      console.log('✅ [EventDrivenSchema] Schema change applied successfully:', {
+        changeType: change.type,
+        projectId,
+        newVersion: data.new_version
+      });
 
       return {
         success: true,

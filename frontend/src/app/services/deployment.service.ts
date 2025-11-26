@@ -74,7 +74,21 @@ export class DeploymentService {
       });
 
       if (orgsError) {
-        console.error('Error fetching organizations:', orgsError);
+        console.error('❌ Error fetching organizations:', orgsError);
+        console.error('❌ Error details:', {
+          message: orgsError.message,
+          name: orgsError.name,
+          stack: orgsError.stack,
+          context: orgsError.context
+        });
+        
+        // If it's a FunctionsHttpError, log the status code and response
+        if (orgsError.name === 'FunctionsHttpError' || orgsError.message?.includes('non-2xx')) {
+          console.error('❌ Edge Function returned non-2xx status code');
+          console.error('❌ This usually means the Edge Function encountered an error');
+          console.error('❌ Check Edge Function logs in Supabase Dashboard');
+        }
+        
         throw orgsError;
       }
 

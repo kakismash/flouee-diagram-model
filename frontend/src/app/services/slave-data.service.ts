@@ -1,7 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Table, ProjectSchema } from '../models/table.model';
-import { environment } from '../../environments/environment';
+import { SupabaseService } from './supabase.service';
 
 export interface TableData {
   [tableName: string]: any[];
@@ -11,23 +11,15 @@ export interface TableData {
   providedIn: 'root'
 })
 export class SlaveDataService {
-  private masterClient: SupabaseClient;
+  private supabaseService = inject(SupabaseService);
   private slaveClient: SupabaseClient | null = null;
 
-  constructor() {
-    // Create Master client with unique storage key to avoid NavigatorLock conflicts
-    this.masterClient = createClient(
-      environment.supabase.url,
-      environment.supabase.anonKey,
-      {
-        auth: {
-          persistSession: false, // Don't persist - we use SupabaseService for auth
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-          storage: undefined // No storage to avoid lock conflicts
-        }
-      }
-    );
+  /**
+   * Get the master client from SupabaseService
+   * This ensures we use the same client that manages the session
+   */
+  private get masterClient(): SupabaseClient {
+    return this.supabaseService.client;
   }
 
   /**
@@ -35,12 +27,15 @@ export class SlaveDataService {
    */
   async initializeSlaveClient(organizationId: string): Promise<void> {
     try {
-      // Get deployment config using Edge Function (secure, no service_role_key exposed)
+      // Get session from SupabaseService's client (which manages the session)
       const { data: { session } } = await this.masterClient.auth.getSession();
       if (!session) {
-        throw new Error('No session available');
+        throw new Error('No session available. Please log in to continue.');
       }
 
+      console.log('🔍 [SlaveData] Calling initialize-slave-client for organization:', organizationId);
+      console.log('🔍 [SlaveData] Session token available:', !!session.access_token);
+      
       const { data: configData, error } = await this.masterClient.functions.invoke('initialize-slave-client', {
         body: {
           organizationId: organizationId
@@ -51,7 +46,52 @@ export class SlaveDataService {
       });
 
       if (error) {
-        console.error('Failed to get deployment config:', error);
+        console.error('❌ [SlaveData] Failed to get deployment config:', error);
+        console.error('❌ [SlaveData] Error details:', {
+          message: error.message,
+          name: error.name,
+          context: error.context
+        });
+        
+        // If it's a 401, the token might be expired - try refreshing
+        if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+          console.log('🔄 [SlaveData] Token might be expired, attempting to refresh session...');
+          const { data: { session: newSession } } = await this.masterClient.auth.refreshSession();
+          if (newSession) {
+            console.log('✅ [SlaveData] Session refreshed, retrying...');
+            // Retry with new session
+            const { data: retryData, error: retryError } = await this.masterClient.functions.invoke('initialize-slave-client', {
+              body: {
+                organizationId: organizationId
+              },
+              headers: {
+                Authorization: `Bearer ${newSession.access_token}`
+              }
+            });
+            
+            if (retryError) {
+              throw new Error(`Failed to get deployment configuration after refresh: ${retryError.message}`);
+            }
+            
+            // Use retry data
+            if (!retryData?.success || !retryData?.slaveClient) {
+              throw new Error('No deployment configuration found after refresh');
+            }
+            
+            const slaveClient = retryData.slaveClient;
+            const projectUrl = slaveClient.projectUrl;
+            const anonKey = slaveClient.anonKey;
+            
+            if (!projectUrl || !anonKey) {
+              throw new Error('Invalid deployment configuration after refresh');
+            }
+            
+            this.slaveClient = createClient(projectUrl, anonKey);
+            console.log('✅ [SlaveData] Slave client initialized after session refresh');
+            return;
+          }
+        }
+        
         throw new Error(`Failed to get deployment configuration: ${error.message}`);
       }
 
@@ -78,7 +118,12 @@ export class SlaveDataService {
       // NOTE: For operations requiring service_role_key, they should be done via Edge Functions
       const keyToUse = anonKey;
       
-      // Create Slave client without session persistence to avoid NavigatorLock conflicts
+      // Create Slave client WITHOUT JWT token
+      // The Slave cannot validate JWT tokens from the Master (different projects, different signing keys)
+      // RPC functions use SECURITY DEFINER, so they don't require a valid JWT token
+      // Security is enforced by:
+      // 1. Schema name validation (org_ + 32 hex chars matching organization_id)
+      // 2. RPC functions validate schema format and organization_id
       this.slaveClient = createClient(projectUrl, keyToUse, {
         auth: {
           persistSession: false, // Don't persist - auth is in Master
@@ -198,22 +243,69 @@ export class SlaveDataService {
 
       const rawData = await this.loadTableData(schemaName, internalName);
 
+      // Find primary key column to ensure it's always mapped to 'id'
+      const primaryKeyColumn = table.columns?.find(col => col.isPrimaryKey);
+      const primaryKeyInternalName = primaryKeyColumn ? (primaryKeyColumn.internal_name || `c_${primaryKeyColumn.id}`) : null;
+
+      console.log('🔍 [SlaveData] Column mapping setup:', {
+        tableName: table.name,
+        primaryKeyColumn: primaryKeyColumn ? {
+          name: primaryKeyColumn.name,
+          internalName: primaryKeyColumn.internal_name || `c_${primaryKeyColumn.id}`,
+          isPrimaryKey: primaryKeyColumn.isPrimaryKey
+        } : null,
+        primaryKeyInternalName
+      });
+
       // Create mapping from internal column names (in DB) to display names (from schema)
       const columnMapping: { [internalName: string]: string } = {};
       table.columns?.forEach(col => {
         const internalColName = col.internal_name || `c_${col.id}`;
-        columnMapping[internalColName] = col.name; // Map internal → display name
+        // If this is the primary key column, always map it to 'id' for consistency
+        if (col.isPrimaryKey) {
+          columnMapping[internalColName] = 'id';
+          console.log(`🔑 [SlaveData] Mapping primary key: ${internalColName} → id`);
+        } else {
+          columnMapping[internalColName] = col.name; // Map internal → display name
+        }
       });
 
+      console.log('📋 [SlaveData] Column mapping:', columnMapping);
+      console.log('📊 [SlaveData] Raw data sample (first row):', rawData.length > 0 ? rawData[0] : null);
+      console.log('🔍 [SlaveData] Raw data keys:', rawData.length > 0 ? Object.keys(rawData[0]) : []);
+      console.log('🔍 [SlaveData] Mapping keys:', Object.keys(columnMapping));
+      
+      // Verify mapping coverage
+      if (rawData.length > 0) {
+        const rawKeys = Object.keys(rawData[0]);
+        const unmappedKeys = rawKeys.filter(key => !columnMapping[key] && !key.startsWith('_'));
+        if (unmappedKeys.length > 0) {
+          console.warn('⚠️ [SlaveData] Unmapped keys in raw data:', unmappedKeys);
+        }
+      }
+
       // Transform data: replace internal column names with display names
-      const transformedData = rawData.map(row => {
+      const transformedData = rawData.map((row, index) => {
         const transformedRow: any = {};
         Object.keys(row).forEach(key => {
           // If we have a mapping for this internal column name, use display name
-          // Otherwise, keep original key (for system columns like id, created_at, etc.)
+          // Otherwise, keep original key (for system columns like created_at, etc.)
           const displayName = columnMapping[key] || key;
           transformedRow[displayName] = row[key];
+          
+          // Log mapping for first row
+          if (index === 0) {
+            console.log(`🔀 [SlaveData] Mapping: ${key} → ${displayName}, value:`, row[key]);
+          }
         });
+        
+        // Log first row for debugging
+        if (index === 0) {
+          console.log('🔄 [SlaveData] Transformed row (first):', transformedRow);
+          console.log('🆔 [SlaveData] Has id field?', !!transformedRow.id, 'id value:', transformedRow.id);
+          console.log('🔑 [SlaveData] All keys in transformed row:', Object.keys(transformedRow));
+        }
+        
         return transformedRow;
       });
 
@@ -221,6 +313,113 @@ export class SlaveDataService {
       return transformedData;
     } catch (error) {
       console.error(`❌ [SlaveData] Failed to refresh data for table ${table.name}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Search table data using Supabase Native API
+   * More efficient than loading all data and filtering in memory
+   * Uses .schema().from() to access custom schemas and .ilike() for case-insensitive search
+   */
+  async searchTableData(
+    organizationId: string,
+    table: Table,
+    searchQuery: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<any[]> {
+    if (!this.slaveClient) {
+      await this.initializeSlaveClient(organizationId);
+    }
+
+    const schemaName = `org_${organizationId.replace(/-/g, '')}`;
+    const internalName = table.internal_name || `t_${table.id}`;
+
+    try {
+      console.log('🔍 [SlaveData] Searching table data:', {
+        tableName: table.name,
+        searchQuery,
+        limit,
+        offset,
+        schemaName,
+        internalName
+      });
+
+      // Build search conditions for all searchable columns
+      // Filter out relationship columns and only search in text/number columns
+      const searchableColumns = table.columns?.filter(col => {
+        // Skip relationship columns and system columns
+        return col.type !== 'RELATIONSHIP' && 
+               col.name !== 'id' && 
+               !col.name.startsWith('_');
+      }) || [];
+
+      if (searchableColumns.length === 0) {
+        console.warn('⚠️ [SlaveData] No searchable columns found for table:', table.name);
+        return [];
+      }
+
+      // Build OR conditions for ILIKE search across all columns
+      const orConditions = searchableColumns.map(col => {
+        const internalColName = col.internal_name || `c_${col.id}`;
+        return `${internalColName}.ilike.%${searchQuery}%`;
+      }).join(',');
+
+      // Build query using Supabase Native API
+      let query = this.slaveClient!
+        .schema(schemaName)
+        .from(internalName)
+        .select('*');
+
+      // Apply OR conditions for multi-column search
+      if (orConditions) {
+        query = query.or(orConditions);
+      }
+
+      // Add pagination using range (Supabase uses range instead of offset)
+      query = query.range(offset, offset + limit - 1);
+
+      // Execute query
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('❌ [SlaveData] Search error:', error);
+        // Fallback to empty array if search fails
+        return [];
+      }
+
+      if (!data || !Array.isArray(data)) {
+        console.warn('⚠️ [SlaveData] Invalid search response:', data);
+        return [];
+      }
+
+      console.log(`✅ [SlaveData] Search returned ${data.length} results`);
+
+      // Map internal column names to display names
+      const columnMapping: { [internalName: string]: string } = {};
+      table.columns?.forEach(col => {
+        const internalColName = col.internal_name || `c_${col.id}`;
+        if (col.isPrimaryKey) {
+          columnMapping[internalColName] = 'id'; // Always map primary key to 'id'
+        } else {
+          columnMapping[internalColName] = col.name; // Map internal → display name
+        }
+      });
+
+      // Transform data: replace internal column names with display names
+      const transformedData = data.map((row: any) => {
+        const transformedRow: any = {};
+        Object.keys(row).forEach(key => {
+          const displayName = columnMapping[key] || key;
+          transformedRow[displayName] = row[key];
+        });
+        return transformedRow;
+      });
+
+      return transformedData;
+    } catch (error: any) {
+      console.error('❌ [SlaveData] Error searching table data:', error);
       return [];
     }
   }
@@ -302,7 +501,9 @@ export class SlaveDataService {
       await this.initializeSlaveClient(organizationId);
     }
 
-    const schemaName = `org_${organizationId.replace(/-/g, '')}`;
+    // Build schema name: org_ + 32 hex chars (UUID without hyphens)
+    const cleanOrgId = organizationId.replace(/-/g, '');
+    const schemaName = `org_${cleanOrgId}`;
     const internalName = table.internal_name || `t_${table.id}`;
 
     try {
@@ -318,44 +519,69 @@ export class SlaveDataService {
         if (column) {
           // Use internal column name (masked) for the database
           const internalColName = column.internal_name || `c_${column.id}`;
-          mappedRecord[internalColName] = processedRecord[key];
+          const value = processedRecord[key];
+          
+          // Skip undefined values (they cause issues with JSONB serialization)
+          if (value !== undefined) {
+            // Convert null to null (explicit), keep other values as-is
+            mappedRecord[internalColName] = value === null ? null : value;
+          }
         }
       }
       
-      // Use standard Supabase .schema().from().insert() method
-      // IMPORTANT: This requires PostgREST to be configured to expose the org_xxx schemas
-      // In Supabase Dashboard: Settings > API > Exposed Schemas
-      // Add the org_xxx schemas or configure to expose all org_* schemas
-      // This allows us to use all Supabase capabilities (filters, sorting, pagination, etc.)
+      // Validate schema name format (must be org_ + 32 hex chars)
+      // Remove all hyphens from organizationId to get the 32-char hex string
+      const cleanOrgId = organizationId.replace(/-/g, '');
+      if (cleanOrgId.length !== 32 || !/^[a-f0-9]{32}$/i.test(cleanOrgId)) {
+        console.error('Invalid organizationId format:', organizationId, 'cleaned:', cleanOrgId);
+        return {
+          success: false,
+          error: `Invalid organization ID format. Expected UUID format.`
+        };
+      }
+      
+      // Ensure schema name is correct format
+      const validatedSchemaName = `org_${cleanOrgId}`;
+      
+      // Log for debugging
+      console.log('🔍 [SlaveData] Inserting record:', {
+        schemaName: validatedSchemaName,
+        tableName: internalName,
+        mappedRecord,
+        recordKeys: Object.keys(mappedRecord)
+      });
+      
+      // Use RPC function to insert into custom schema table
+      // This is more reliable than .schema().from().insert() when schemas might not be fully exposed
       const { data, error } = await this.slaveClient!
-        .schema(schemaName)
-        .from(internalName)
-        .insert([mappedRecord])
-        .select()
-        .single();
+        .rpc('insert_table_record', {
+          p_schema: validatedSchemaName,
+          p_table: internalName,
+          p_data: mappedRecord
+        });
 
       if (error) {
         console.error('Error inserting record:', error);
-        // If error is 404/406, it means the schema is not exposed in PostgREST
-        const errorMessage = error.message || '';
-        const isSchemaNotExposed = 
-          error.code === 'PGRST205' || 
-          error.code === 'PGRST116' ||
-          errorMessage.includes('not found') ||
-          errorMessage.includes('does not exist') ||
-          errorMessage.includes('Could not find') ||
-          errorMessage.includes('Not Acceptable');
-        
-        if (isSchemaNotExposed) {
-          return {
-            success: false,
-            error: `Schema ${schemaName} not exposed in PostgREST. Please configure PostgREST to expose this schema in Supabase Dashboard (Settings > API > Exposed Schemas). See docs/setup/EXPOSE_ORG_SCHEMAS.md for instructions.`
-          };
-        }
         return {
           success: false,
           error: error.message || 'Unknown error inserting record'
         };
+      }
+
+      // RPC function returns JSON, parse it if needed
+      let parsedData: any;
+      if (typeof data === 'string') {
+        try {
+          parsedData = JSON.parse(data);
+        } catch (parseError) {
+          console.error('Error parsing RPC response:', parseError);
+          return {
+            success: false,
+            error: 'Failed to parse response from database'
+          };
+        }
+      } else {
+        parsedData = data;
       }
 
       // Map internal column names back to display names
@@ -369,13 +595,13 @@ export class SlaveDataService {
       const mappedData: any = {};
       
       // First, map all columns using the column mapping
-      for (const key in data) {
+      for (const key in parsedData) {
         if (columnMapping[key]) {
           // Map internal column name to display name
-          mappedData[columnMapping[key]] = data[key];
+          mappedData[columnMapping[key]] = parsedData[key];
         } else {
           // Keep unmapped keys as-is (e.g., system columns)
-          mappedData[key] = data[key];
+          mappedData[key] = parsedData[key];
         }
       }
       
@@ -387,22 +613,22 @@ export class SlaveDataService {
         const displayIdName = primaryKeyColumn.name; // Usually 'id' but could be different
         
         // If the id is in the data with its internal name, map it to the display name
-        if (data[internalIdName] !== undefined && !mappedData[displayIdName]) {
-          mappedData[displayIdName] = data[internalIdName];
+        if (parsedData[internalIdName] !== undefined && !mappedData[displayIdName]) {
+          mappedData[displayIdName] = parsedData[internalIdName];
         }
         
         // Also ensure 'id' is set if the display name is 'id'
-        if (displayIdName === 'id' && data[internalIdName] !== undefined) {
-          mappedData.id = data[internalIdName];
+        if (displayIdName === 'id' && parsedData[internalIdName] !== undefined) {
+          mappedData.id = parsedData[internalIdName];
         }
-      } else if (data.id !== undefined && !mappedData.id) {
+      } else if (parsedData.id !== undefined && !mappedData.id) {
         // Fallback: if there's an 'id' in the data, use it
-        mappedData.id = data.id;
+        mappedData.id = parsedData.id;
       }
       
       // Debug: log the mapping to help troubleshoot
       console.log('Insert result mapping:', {
-        originalData: data,
+        originalData: parsedData,
         columnMapping: columnMapping,
         mappedData: mappedData,
         primaryKeyColumn: primaryKeyColumn
@@ -522,42 +748,43 @@ export class SlaveDataService {
         }
       }
 
-      // Use standard Supabase .schema().from().update() method
-      // This works with realtime subscriptions and is more efficient
-      // Use the internal name of the primary key column in the filter
+      // Use RPC function to update record in custom schema table
+      // PostgREST cannot directly access tables in custom schemas without configuration
+      // This is more reliable than .schema().from().update() when schemas might not be fully exposed
       const { data, error } = await this.slaveClient!
-        .schema(schemaName)
-        .from(internalName)
-        .update(mappedUpdates)
-        .eq(primaryKeyInternalName, recordId)
-        .select()
-        .single();
+        .rpc('update_table_record', {
+          p_schema: schemaName,
+          p_table: internalName,
+          p_id: recordId,
+          p_data: mappedUpdates
+        });
 
       if (error) {
         console.error('Error updating record:', error);
-        // If error is 404/406, it means the schema is not exposed in PostgREST
-        const errorMessage = error.message || '';
-        const isSchemaNotExposed = 
-          error.code === 'PGRST205' || 
-          error.code === 'PGRST116' ||
-          errorMessage.includes('not found') ||
-          errorMessage.includes('does not exist');
-        
-        if (isSchemaNotExposed) {
-          return {
-            success: false,
-            error: `Schema ${schemaName} is not exposed in PostgREST. Please configure it in Supabase Dashboard > Settings > API > Exposed Schemas`
-          };
-        }
-
         return {
           success: false,
-          error: error.message
+          error: error.message || 'Unknown error updating record'
         };
       }
 
+      // RPC function returns JSON, parse it if needed
+      let parsedData: any;
+      if (typeof data === 'string') {
+        try {
+          parsedData = JSON.parse(data);
+        } catch (parseError) {
+          console.error('Error parsing RPC response:', parseError);
+          return {
+            success: false,
+            error: 'Failed to parse response from database'
+          };
+        }
+      } else {
+        parsedData = data;
+      }
+
       // Map internal column names back to display names
-      const mappedData = this.mapInternalToDisplayNames(data, table);
+      const mappedData = this.mapInternalToDisplayNames(parsedData, table);
 
       return {
         success: true,
@@ -573,8 +800,7 @@ export class SlaveDataService {
 
   /**
    * Delete a record from Slave database
-   * Uses standard Supabase .schema().from().delete() method
-   * IMPORTANT: Requires PostgREST to be configured to expose the org_xxx schemas
+   * Uses the delete_table_record RPC function for consistency and robustness
    */
   async deleteRecord(
     organizationId: string,
@@ -588,46 +814,33 @@ export class SlaveDataService {
     const schemaName = `org_${organizationId.replace(/-/g, '')}`;
     const internalName = table.internal_name || `t_${table.id}`;
 
+    // Validate schema name format
+    if (!/^org_[a-f0-9]{32}$/.test(schemaName)) {
+      return { success: false, error: `Invalid schema name format: ${schemaName}` };
+    }
+
     try {
-      // Use standard Supabase .schema().from().delete() method
-      // This works with realtime subscriptions and is more efficient
-      const { error } = await this.slaveClient!
-        .schema(schemaName)
-        .from(internalName)
-        .delete()
-        .eq('id', recordId);
+      const { data, error } = await this.slaveClient!
+        .rpc('delete_table_record', {
+          p_schema: schemaName,
+          p_table: internalName,
+          p_id: recordId
+        });
 
       if (error) {
         console.error('Error deleting record:', error);
-        // If error is 404/406, it means the schema is not exposed in PostgREST
-        const errorMessage = error.message || '';
-        const isSchemaNotExposed = 
-          error.code === 'PGRST205' || 
-          error.code === 'PGRST116' ||
-          errorMessage.includes('not found') ||
-          errorMessage.includes('does not exist');
-        
-        if (isSchemaNotExposed) {
-          return {
-            success: false,
-            error: `Schema ${schemaName} is not exposed in PostgREST. Please configure it in Supabase Dashboard > Settings > API > Exposed Schemas`
-          };
-        }
-
-        return {
-          success: false,
-          error: error.message
-        };
+        return { success: false, error: error.message || 'Unknown error deleting record' };
       }
 
-      return {
-        success: true
-      };
+      // RPC returns boolean indicating if record was deleted
+      if (data === false) {
+        return { success: false, error: 'Record not found or could not be deleted' };
+      }
+
+      return { success: true };
     } catch (error: any) {
-      return {
-        success: false,
-        error: error.message || 'Unknown error deleting record'
-      };
+      console.error('Exception deleting record:', error);
+      return { success: false, error: error.message || 'Unknown error deleting record' };
     }
   }
 

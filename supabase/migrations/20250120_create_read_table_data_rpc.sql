@@ -141,10 +141,27 @@ DECLARE
   v_set_clauses TEXT;
   v_key TEXT;
   v_value JSONB;
+  v_pk_column TEXT;
 BEGIN
   -- Validate schema name format
   IF p_schema !~ '^org_[a-f0-9]{32}$' THEN
     RAISE EXCEPTION 'Invalid schema name format';
+  END IF;
+
+  -- Find the primary key column name for this table
+  SELECT a.attname INTO v_pk_column
+  FROM pg_constraint c
+  JOIN pg_class t ON c.conrelid = t.oid
+  JOIN pg_namespace n ON t.relnamespace = n.oid
+  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+  WHERE n.nspname = p_schema
+    AND t.relname = p_table
+    AND c.contype = 'p'
+  LIMIT 1;
+
+  -- If no primary key found, raise an error
+  IF v_pk_column IS NULL THEN
+    RAISE EXCEPTION 'No primary key column found for table %.%', p_schema, p_table;
   END IF;
 
   -- Build SET clauses
@@ -162,12 +179,13 @@ BEGIN
   INTO v_set_clauses
   FROM jsonb_each(p_data);
 
-  -- Build UPDATE query
+  -- Build UPDATE query using the actual primary key column name
   v_query := format(
-    'UPDATE %I.%I SET %s WHERE id = %L RETURNING row_to_json(t.*)',
+    'UPDATE %I.%I SET %s WHERE %I = %L RETURNING row_to_json(t.*)',
     p_schema,
     p_table,
     v_set_clauses,
+    v_pk_column,
     p_id
   );
 
@@ -194,18 +212,37 @@ SECURITY DEFINER
 AS $$
 DECLARE
   v_query TEXT;
-  v_deleted BOOLEAN;
+  v_deleted INTEGER;
+  v_pk_column TEXT;
 BEGIN
   -- Validate schema name format
   IF p_schema !~ '^org_[a-f0-9]{32}$' THEN
     RAISE EXCEPTION 'Invalid schema name format';
   END IF;
 
-  -- Build DELETE query
+  -- Find the primary key column name for this table
+  SELECT a.attname INTO v_pk_column
+  FROM pg_constraint c
+  JOIN pg_class t ON c.conrelid = t.oid
+  JOIN pg_namespace n ON t.relnamespace = n.oid
+  JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+  WHERE n.nspname = p_schema
+    AND t.relname = p_table
+    AND c.contype = 'p'
+  LIMIT 1;
+
+  -- If no primary key found, raise an error
+  IF v_pk_column IS NULL THEN
+    RAISE EXCEPTION 'No primary key column found for table %.%', p_schema, p_table;
+  END IF;
+
+  -- Build DELETE query using the actual primary key column name
+  -- Cast p_id to UUID if the column is UUID type, otherwise use as TEXT
   v_query := format(
-    'DELETE FROM %I.%I WHERE id = %L',
+    'DELETE FROM %I.%I WHERE %I = %L::uuid',
     p_schema,
     p_table,
+    v_pk_column,
     p_id
   );
 

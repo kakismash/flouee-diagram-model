@@ -60,11 +60,13 @@ import { PhaseCellComponent } from '../../phase-cell/phase-cell.component';
               [isEditingColumnName]="getSafeIsEditingColumnName(column.id)"
               [editingColumnNameValue]="editingColumnNameValue?.() || ''"
               [columnWidth]="getColumnWidth?.(column.id)"
+              [canDelete]="canDeleteColumn(column)"
               (startEditColumnName)="onStartEditColumnName.emit($event)"
               (updateEditingColumnNameValue)="onUpdateEditingColumnNameValue.emit($event)"
               (saveColumnName)="onSaveColumnName.emit($event)"
               (cancelEditColumnName)="onCancelEditColumnName.emit()"
-              (columnResized)="onColumnResized.emit($event)">
+              (columnResized)="onColumnResized.emit($event)"
+              (deleteColumn)="onDeleteColumn.emit($event)">
             </app-table-header>
           </th>
           
@@ -202,9 +204,10 @@ import { PhaseCellComponent } from '../../phase-cell/phase-cell.component';
             <!-- Delete button for regular rows -->
             <button mat-icon-button 
                     class="delete-row-button"
-                    (click)="onDeleteRow && onDeleteRow.emit({rowIndex: i, element}); $event.stopPropagation()"
+                    (click)="handleDeleteClick($event, i, element)"
                     matTooltip="Delete Row"
-                    matTooltipPosition="below">
+                    matTooltipPosition="below"
+                    type="button">
               <mat-icon>delete</mat-icon>
             </button>
           }
@@ -337,11 +340,22 @@ import { PhaseCellComponent } from '../../phase-cell/phase-cell.component';
       color: var(--theme-error);
       opacity: 0.6;
       transition: opacity 0.2s ease;
+      position: relative;
     }
 
     .delete-row-button:hover {
       opacity: 1;
       background-color: var(--theme-error-container);
+    }
+
+    /* Ensure mat-focus-indicator doesn't block clicks */
+    .delete-row-button ::ng-deep .mat-focus-indicator {
+      pointer-events: none;
+    }
+
+    /* Ensure the button itself captures all clicks */
+    .delete-row-button {
+      pointer-events: auto;
     }
     
     .relationship-header {
@@ -663,6 +677,7 @@ export class TableBodyComponent implements OnInit, OnChanges {
   @Output() onAddField = new EventEmitter<void>();
   @Output() onDeleteRow = new EventEmitter<{rowIndex: number, element: any}>();
   @Output() onColumnResized = new EventEmitter<{columnId: string, width: number}>();
+  @Output() onDeleteColumn = new EventEmitter<{columnId: string, columnName: string}>();
   @Output() onPhaseChanged = new EventEmitter<{rowIndex: number, phaseId: string | null}>();
   @Output() onRowHover = new EventEmitter<{rowIndex: number, isHovering: boolean}>();
   @Output() onAddNewRow = new EventEmitter<{columnId: string}>();
@@ -677,6 +692,22 @@ export class TableBodyComponent implements OnInit, OnChanges {
     console.log('🟠 Emitting onStartAddRecord');
     this.onStartAddRecord.emit();
     console.log('🟠 handleAddRecordClick - END');
+  }
+
+  /**
+   * Handle delete button click - ensures event is properly handled
+   */
+  handleDeleteClick(event: MouseEvent, rowIndex: number, element: any): void {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    console.log('🗑️ Delete button clicked:', { rowIndex, element });
+    
+    if (this.onDeleteRow) {
+      this.onDeleteRow.emit({ rowIndex, element });
+    } else {
+      console.warn('⚠️ onDeleteRow output is not defined');
+    }
   }
   
   @Input() getColumnWidth?: (columnId: string) => number | undefined;
@@ -732,6 +763,11 @@ export class TableBodyComponent implements OnInit, OnChanges {
   ngOnChanges(changes: SimpleChanges) {
     if (changes['dataSource']) {
       const newDataSource = changes['dataSource'].currentValue || [];
+      console.log('🔄 [TableBody] dataSource changed:', {
+        previousLength: changes['dataSource'].previousValue?.length || 0,
+        currentLength: newDataSource.length,
+        isFirstChange: changes['dataSource'].firstChange
+      });
       this.dataSourceSignal.set(newDataSource);
     }
   }
@@ -758,6 +794,14 @@ export class TableBodyComponent implements OnInit, OnChanges {
     if (!isRequired) return false;
     const value = element[column.name];
     return value === null || value === undefined || value === '';
+  }
+
+  canDeleteColumn(column: TableColumn): boolean {
+    // Can delete if:
+    // 1. Not the id column (name === 'id')
+    // 2. Not a primary key
+    // 3. Not auto-generated
+    return !(column.name === 'id' || column.isPrimaryKey || column.isAutoGenerate || column.isAutoIncrement);
   }
 
   isRequiredFieldFilled(element: any, column: any): boolean {

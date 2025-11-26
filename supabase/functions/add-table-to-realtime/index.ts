@@ -1,6 +1,6 @@
-// Edge Function: Initialize Slave Client
-// Returns slave project URL and anon_key (safe to expose) after validating user belongs to organization
-// This replaces direct access to deployment_configs from frontend
+// Edge Function: Add Table to Realtime
+// Validates user belongs to organization and uses service_role to add table to realtime publication
+// This is more secure than allowing authenticated users to call the RPC directly
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -10,8 +10,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-interface InitializeSlaveClientRequest {
+interface AddTableToRealtimeRequest {
   organizationId: string;
+  tableName: string;
 }
 
 serve(async (req) => {
@@ -40,11 +41,11 @@ serve(async (req) => {
     )
 
     // Parse request body
-    const { organizationId }: InitializeSlaveClientRequest = await req.json()
+    const { organizationId, tableName }: AddTableToRealtimeRequest = await req.json()
 
-    if (!organizationId) {
+    if (!organizationId || !tableName) {
       return new Response(
-        JSON.stringify({ error: 'Missing required field: organizationId' }),
+        JSON.stringify({ error: 'Missing required fields: organizationId, tableName' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -54,18 +55,11 @@ serve(async (req) => {
 
     // Extract user ID from JWT token
     const token = authHeader.replace('Bearer ', '')
-    
-    console.log('🔍 [initialize-slave-client] Validating token for organization:', organizationId)
-    
     const { data: { user }, error: userError } = await masterClient.auth.getUser(token)
 
     if (userError || !user) {
-      console.error('❌ [initialize-slave-client] Token validation failed:', userError)
       return new Response(
-        JSON.stringify({ 
-          error: 'Invalid or expired token',
-          details: userError?.message || 'Token validation failed'
-        }),
+        JSON.stringify({ error: 'Invalid or expired token' }),
         { 
           status: 401, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -74,34 +68,17 @@ serve(async (req) => {
     }
 
     const userId = user.id
-    console.log('✅ [initialize-slave-client] Token validated for user:', userId)
 
     // Validate user belongs to the organization
-    console.log('🔍 [initialize-slave-client] Checking user organization membership...')
     const { data: userRecord, error: userCheckError } = await masterClient
       .from('users')
       .select('organization_id, role')
       .eq('id', userId)
-      .maybeSingle()
+      .single()
 
-    if (userCheckError) {
-      console.error('❌ [initialize-slave-client] Error checking user:', userCheckError)
+    if (userCheckError || !userRecord) {
       return new Response(
-        JSON.stringify({ 
-          error: 'Error checking user record',
-          details: userCheckError.message
-        }),
-        { 
-          status: 500, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      )
-    }
-
-    if (!userRecord) {
-      console.error('❌ [initialize-slave-client] User not found in users table:', userId)
-      return new Response(
-        JSON.stringify({ error: 'User not found in users table' }),
+        JSON.stringify({ error: 'User not found' }),
         { 
           status: 404, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -109,21 +86,9 @@ serve(async (req) => {
       )
     }
 
-    console.log('📊 [initialize-slave-client] User record:', {
-      userId,
-      userOrgId: userRecord.organization_id,
-      requestedOrgId: organizationId,
-      match: userRecord.organization_id === organizationId
-    })
-
     if (userRecord.organization_id !== organizationId) {
-      console.error('❌ [initialize-slave-client] User does not belong to organization')
       return new Response(
-        JSON.stringify({ 
-          error: 'User does not belong to this organization',
-          userOrgId: userRecord.organization_id,
-          requestedOrgId: organizationId
-        }),
+        JSON.stringify({ error: 'User does not belong to this organization' }),
         { 
           status: 403, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -131,13 +96,12 @@ serve(async (req) => {
       )
     }
 
-    // Get deployment config (including anon_key which is safe to expose)
+    // Get deployment config for the organization
     const { data: deploymentConfig, error: configError } = await masterClient
       .from('deployment_configs')
       .select(`
-        supabase_project_ref,
         supabase_project_url,
-        supabase_anon_key,
+        supabase_service_role_key,
         schema_name,
         status
       `)
@@ -155,19 +119,51 @@ serve(async (req) => {
       )
     }
 
-    // Return slave client configuration
-    // NOTE: anon_key is safe to expose (it's public by design)
-    // service_role_key is NEVER returned
+    if (!deploymentConfig.supabase_service_role_key) {
+      return new Response(
+        JSON.stringify({ error: 'Service role key not available for this deployment' }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
+    // Calculate schema name: org_ + organizationId without dashes
+    const schemaName = `org_${organizationId.replace(/-/g, '')}`
+
+    // Create slave client with service_role_key
+    const slaveClient = createClient(
+      deploymentConfig.supabase_project_url,
+      deploymentConfig.supabase_service_role_key
+    )
+
+    // Call add_table_to_realtime RPC in slave using service_role
+    const { data, error } = await slaveClient.rpc('add_table_to_realtime', {
+      p_schema_name: schemaName,
+      p_table_name: tableName
+    })
+
+    if (error) {
+      console.error('Error adding table to realtime:', error)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to add table to realtime',
+          details: error.message 
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
-        slaveClient: {
-          projectRef: deploymentConfig.supabase_project_ref,
-          projectUrl: deploymentConfig.supabase_project_url,
-          anonKey: deploymentConfig.supabase_anon_key,  // Safe to expose
-          schemaName: deploymentConfig.schema_name,
-          status: deploymentConfig.status
-        }
+        schemaName,
+        tableName,
+        message: `Table ${schemaName}.${tableName} added to realtime publication`
       }),
       { 
         status: 200, 
@@ -176,7 +172,7 @@ serve(async (req) => {
     )
 
   } catch (error: any) {
-    console.error('❌ Error in initialize-slave-client:', error)
+    console.error('❌ Error in add-table-to-realtime:', error)
     
     return new Response(
       JSON.stringify({ 

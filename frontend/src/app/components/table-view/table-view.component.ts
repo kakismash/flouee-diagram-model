@@ -23,7 +23,9 @@ import { TableViewManagerService } from '../../services/table-view-manager.servi
 import { TableColumnNameEditorService } from '../../services/table-column-name-editor.service';
 import { ViewConfigDialogComponent } from '../view-config-dialog/view-config-dialog.component';
 import { SchemaEditorDialogComponent } from '../schema-editor-dialog/schema-editor-dialog.component';
+import { ConfirmDialogComponent } from '../confirm-dialog/confirm-dialog.component';
 import { RealtimeTableDataService } from '../../services/realtime-table-data.service';
+import { SlaveDataService } from '../../services/slave-data.service';
 
 // Import existing components
 import { TableToolbarComponent } from '../table-toolbar/table-toolbar.component';
@@ -135,6 +137,7 @@ import { TableSkeletonComponent } from './table-skeleton/table-skeleton.componen
             (onDeleteRow)="onDeleteRow($event)"
             [getColumnWidth]="getColumnWidth"
             (onColumnResized)="onColumnResized($event)"
+            (onDeleteColumn)="onDeleteColumn($event)"
             [hasPhases]="getHasPhases()"
             [phases]="getPhases"
             [getPhaseIdForRow]="getPhaseIdForRow"
@@ -367,6 +370,7 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
   @Input() allTableData: { [tableName: string]: any[] } = {};
   @Input() views: TableView[] = [];
   @Input() activeView: TableView | null = null;
+  @Input() isActive: boolean = false; // Whether this table view is currently active (visible tab)
 
   @Output() dataChanged = new EventEmitter<DataChangeEvent>();
   @Output() viewSelected = new EventEmitter<TableView>();
@@ -415,7 +419,6 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
   
   // Temporary record management - simplified to single object
   temporaryRecord: any | null = null; // Single temporary record (appended to filtered data)
-  private autoSaveTimeout: any = null;
   
   // Pagination properties
   pageSize = 25;
@@ -478,28 +481,39 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     private viewManagerService: TableViewManagerService,
     private columnNameEditorService: TableColumnNameEditorService,
     private cdr: ChangeDetectorRef,
-    private realtimeTableDataService: RealtimeTableDataService
+    private realtimeTableDataService: RealtimeTableDataService,
+    private slaveDataService: SlaveDataService
   ) {
-    // React to table changes - subscribe/unsubscribe to realtime data
+    // React to table changes and active state - subscribe/unsubscribe to realtime data
     runInInjectionContext(this.injector, () => {
       effect(() => {
         const table = this.table;
+        const isActive = this.isActive; // Watch the isActive input
         if (!table || !this.isTableInputReady()) {
           return;
         }
 
-        // Only subscribe if we haven't already subscribed to this table
-        if (this.subscribedTableId !== table.id) {
+        // Only subscribe if table is active and we haven't already subscribed to this table
+        if (isActive && this.subscribedTableId !== table.id) {
           // Unsubscribe from previous table if exists
           if (this.subscribedTableId) {
+            console.log(`🔌 [TableView] Unsubscribing from previous table ${this.subscribedTableId}`);
             this.realtimeTableDataService.unsubscribeFromTable(this.subscribedTableId);
             this.currentDataSignal = null;
           }
 
           // Subscribe to new table
+          console.log(`📡 [TableView] Subscribing to table ${table.name} (${table.id}) - isActive: ${isActive}`);
           this.subscribeToTableData(table);
           this.subscribedTableId = table.id;
           this.previousTableId = table.id;
+        } else if (!isActive && this.subscribedTableId === table.id) {
+          // If not active and currently subscribed, unsubscribe
+          console.log(`🔌 [TableView] Unsubscribing from table ${table.name} (${table.id}) - isActive: ${isActive}`);
+          this.realtimeTableDataService.unsubscribeFromTable(this.subscribedTableId);
+          this.subscribedTableId = null;
+          this.currentDataSignal = null;
+          this.tableData.set([]); // Clear data when inactive
         }
       });
 
@@ -509,9 +523,15 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
         // Watch both our tableData signal and the realtime signal
         if (this.currentDataSignal) {
           const realtimeData = this.currentDataSignal();
+          console.log('📥 [TableView] Received data from realtime signal:', {
+            rowCount: realtimeData.length,
+            sampleRow: realtimeData.length > 0 ? realtimeData[0] : null,
+            sampleRowKeys: realtimeData.length > 0 ? Object.keys(realtimeData[0]) : []
+          });
           this.tableData.set(realtimeData);
         }
         const data = this.tableData();
+        console.log('🔄 [TableView] Effect triggered - applying filters and sort, data length:', data.length);
         this.applyFiltersAndSort();
       });
 
@@ -667,13 +687,29 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
 
   ngOnChanges(changes: SimpleChanges) {
     // Table changes are handled by the effect() in constructor
-    // Just reinitialize columns if table changed
+    // Reinitialize columns if table changed or if columns changed
     if (changes['table'] && this.table && this.isTableInputReady()) {
-      // Reinitialize columns
-      if (this.activeView) {
-        this.applyViewToTable(this.activeView);
-      } else {
-        this.applyDefaultColumns();
+      const previousTable = changes['table'].previousValue as Table | undefined;
+      const currentTable = changes['table'].currentValue as Table;
+      
+      // Check if columns have changed (by comparing column IDs)
+      const columnsChanged = !previousTable || 
+        previousTable.columns.length !== currentTable.columns.length ||
+        previousTable.columns.some((prevCol, index) => {
+          const currCol = currentTable.columns[index];
+          return !currCol || prevCol.id !== currCol.id || prevCol.name !== currCol.name;
+        });
+      
+      if (columnsChanged) {
+        console.log(`🔄 [TableView] Table columns changed for ${currentTable.name}, reinitializing columns`);
+        // Reinitialize columns
+        if (this.activeView) {
+          this.applyViewToTable(this.activeView);
+        } else {
+          this.applyDefaultColumns();
+        }
+        // Update pagination after column changes
+        this.updatePagination();
       }
     }
     
@@ -732,9 +768,9 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     // This is a placeholder - columns will be handled via menu
   };
 
-  onSearchChanged = (searchValue: string) => {
+  onSearchChanged = async (searchValue: string) => {
     this.searchQuery.set(searchValue);
-    this.applyFiltersAndSort();
+    await this.applyFiltersAndSort();
   };
   onOpenViewManager = () => this.openViewManager();
   onToggleMultiSelect = () => this.tableEditService.toggleMultiSelectMode();
@@ -744,82 +780,57 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     this.tableEditService.startEdit(event.rowIndex, event.columnName, event.value);
 
   onTabNext = (event: {rowIndex: number, columnName: string}) => {
-    if (!this.temporaryRecord) return;
-    
-    // First, ensure the current field value is saved to the record
-    const currentColumnName = event.columnName.replace('reg_', '');
-    const currentColumn = this.table.columns.find(col => col.name === currentColumnName);
-    if (currentColumn) {
-      let currentValue = this.temporaryRecord[currentColumn.name];
-      if (currentValue === undefined || currentValue === null || currentValue === '') {
-        currentValue = this.tableEditService.editingValue();
+    // Handle Tab navigation for temporary records
+    if (this.temporaryRecord) {
+      // First, ensure the current field value is saved to the record (but don't save to DB)
+      const currentColumnName = event.columnName.replace('reg_', '');
+      const currentColumn = this.table.columns.find(col => col.name === currentColumnName);
+      if (currentColumn) {
+        // Get current value from input element
+        const inputElement = document.querySelector(
+          `tr[mat-row].temporary-row td[mat-cell] app-table-cell[ng-reflect-column-name="${event.columnName}"] input`
+        ) as HTMLInputElement;
+        
+        let currentValue = this.temporaryRecord[currentColumn.name];
+        if (inputElement) {
+          currentValue = inputElement.value || currentValue;
+        } else if (currentValue === undefined || currentValue === null || currentValue === '') {
+          currentValue = this.tableEditService.editingValue();
+        }
+        
+        const parsedValue = this.tableEditService.parseValue(String(currentValue || ''), currentColumn.name, this.table);
+        this.temporaryRecord[currentColumn.name] = parsedValue;
       }
-      const parsedValue = this.tableEditService.parseValue(String(currentValue || ''), currentColumn.name, this.table);
-      this.temporaryRecord[currentColumn.name] = parsedValue;
-    }
-    
-    // Validate that previous required fields are filled
-    const validation = this.dataEditorService.validatePreviousRequiredFields(
-      this.temporaryRecord,
-      this.table,
-      currentColumnName
-    );
-    
-    if (!validation.isValid) {
-      const missingFieldsStr = validation.missingFields.join(', ');
-      this.notificationService.showError(
-        `Please fill required fields before proceeding: ${missingFieldsStr}`
-      );
       
-      const rowElement = document.querySelector(`tr[mat-row].temporary-row`);
-      if (rowElement) {
-        rowElement.classList.add('bounce');
-        setTimeout(() => rowElement.classList.remove('bounce'), 600);
+      // Get next editable column
+      const nextColumn = this.dataEditorService.getNextEditableColumn(this.table, currentColumnName);
+      
+      if (nextColumn) {
+        const nextColumnName = 'reg_' + nextColumn.name;
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+          const inputElement = document.querySelector(
+            `tr[mat-row].temporary-row td[mat-cell] app-table-cell[ng-reflect-column-name="${nextColumnName}"] input`
+          ) as HTMLInputElement;
+          if (inputElement) {
+            inputElement.focus();
+            inputElement.select();
+          }
+        }, 50);
+      } else {
+        // No more columns - focus stays on last field
+        // Don't auto-save - user must click Save button
       }
       return;
     }
     
-    // Get next editable column
-    const nextColumn = this.dataEditorService.getNextEditableColumn(this.table, currentColumnName);
-    
-    if (nextColumn) {
-      const nextColumnName = 'reg_' + nextColumn.name;
-      setTimeout(() => {
-        const inputElement = document.querySelector(
-          `tr[mat-row].temporary-row td[mat-cell] app-table-cell[ng-reflect-column-name="${nextColumnName}"] input`
-        ) as HTMLInputElement;
-        if (inputElement) {
-          inputElement.focus();
-          inputElement.select();
-        }
-      }, 0);
-    } else {
-      // No more columns, check if all required fields are filled and save
-      if (this.dataEditorService.validateRequiredFields(this.temporaryRecord, this.table)) {
-        this.autoSaveTemporaryRecord();
-      } else {
-        const validationDetails = this.dataEditorService.validateRequiredFields(
-          this.temporaryRecord,
-          this.table,
-          true
-        ) as { isValid: boolean; missingFields: string[] };
-        const missingFieldsStr = validationDetails.missingFields.join(', ');
-        this.notificationService.showError(
-          `Please fill all required fields: ${missingFieldsStr}`
-        );
-        
-        const rowElement = document.querySelector(`tr[mat-row].temporary-row`);
-        if (rowElement) {
-          rowElement.classList.add('bounce');
-          setTimeout(() => rowElement.classList.remove('bounce'), 600);
-        }
-      }
-    }
+    // For existing records, Tab navigation is handled by the cell component
+    // This should not be called for existing records in the current implementation
   };
   onValueChange = (valueOrEvent: any) => {
     // Check if this is an always-editing mode event (has columnName and rowIndex)
     if (valueOrEvent && typeof valueOrEvent === 'object' && valueOrEvent.columnName && valueOrEvent.rowIndex !== undefined) {
-      // Always-editing mode: update the record directly
+      // Always-editing mode (temporary records): update the record directly
       if (this.temporaryRecord) {
         const columnName = valueOrEvent.columnName.replace('reg_', '');
         const column = this.table.columns.find(col => col.name === columnName);
@@ -830,16 +841,8 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
           // Update filtered data to reflect change
           this.applyFiltersAndSort();
           
-          // Check if all required fields are now complete
-          if (this.dataEditorService.validateRequiredFields(this.temporaryRecord, this.table)) {
-            if (this.autoSaveTimeout) {
-              clearTimeout(this.autoSaveTimeout);
-            }
-            this.autoSaveTimeout = setTimeout(() => {
-              this.autoSaveTemporaryRecord();
-              this.autoSaveTimeout = null;
-            }, 1000);
-          }
+          // NO AUTO-SAVE for temporary records - only Save button should save
+          // Removed auto-save timeout logic
         }
       }
     } else {
@@ -849,7 +852,7 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
   };
   
   onSaveEdit = (rowIndex: number, columnName: string, element: any) => {
-    // For temporary records in always-editing mode
+    // For temporary records: only update value in memory, NO auto-save
     if (element._isTemporary && element === this.temporaryRecord) {
       const actualColumnName = columnName.replace('reg_', '');
       const column = this.table.columns.find(col => col.name === actualColumnName);
@@ -869,39 +872,16 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
         const parsedValue = this.tableEditService.parseValue(String(currentValue || ''), column.name, this.table);
         this.temporaryRecord[column.name] = parsedValue;
         
-        // Update filtered data
+        // Update filtered data to reflect change
         this.applyFiltersAndSort();
         
-        // Validate and auto-save if valid
-        setTimeout(() => {
-          const isValid = this.dataEditorService.validateRequiredFields(this.temporaryRecord, this.table);
-          if (isValid) {
-            this.autoSaveTemporaryRecord();
-          } else {
-            const validationDetails = this.dataEditorService.validateRequiredFields(
-              this.temporaryRecord,
-              this.table,
-              true
-            ) as { isValid: boolean; missingFields: string[] };
-            if (validationDetails.missingFields.length > 0) {
-              const missingFieldsStr = validationDetails.missingFields.join(', ');
-              this.notificationService.showError(
-                `Please fill all required fields before saving: ${missingFieldsStr}`
-              );
-              
-              const rowElement = document.querySelector(`tr[mat-row].temporary-row`);
-              if (rowElement) {
-                rowElement.classList.add('bounce');
-                setTimeout(() => rowElement.classList.remove('bounce'), 600);
-              }
-            }
-          }
-        }, 0);
+        // NO AUTO-SAVE - temporary records only save via explicit "Save" button click
+        // Removed all auto-save logic from here
       }
       return;
     }
     
-    // Regular record save - realtime will handle the update
+    // Regular record save - auto-save per field (existing behavior)
     this.dataEditorService.saveEdit(
       rowIndex,
       columnName,
@@ -948,6 +928,12 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
         
         // Update display
         this.applyFiltersAndSort();
+        
+        // After saving, focus first field of new row if user wants to add another record
+        // This allows Tab to start from first field after save
+        setTimeout(() => {
+          // Focus will be handled when user clicks "Add Record" again
+        }, 100);
         
         return { success: true };
       },
@@ -1048,8 +1034,8 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
   }
 
   onPhaseChanged = (event: {rowIndex: number, phaseId: string | null}) => {
-    if (event.rowIndex >= 0 && event.rowIndex < this.paginatedData.length) {
-      const row = this.paginatedData[event.rowIndex];
+      if (event.rowIndex >= 0 && event.rowIndex < this.paginatedData.length) {
+        const row = this.paginatedData[event.rowIndex];
       if (row) {
         row._phaseId = event.phaseId;
         // Emit data change event to persist the phase
@@ -1093,12 +1079,25 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
       const startIndex = this.currentPage * this.pageSize;
       const endIndex = startIndex + this.pageSize;
       
+      console.log('📄 [TableView] updatePagination called:', {
+        filteredLength: filtered?.length || 0,
+        currentPage: this.currentPage,
+        pageSize: this.pageSize,
+        startIndex,
+        endIndex
+      });
+      
       if (!filtered || filtered.length === 0) {
         this.paginatedData = [];
+        console.log('📄 [TableView] No filtered data, paginatedData cleared');
         return;
       }
       
       this.paginatedData = [...filtered.slice(startIndex, endIndex)];
+      console.log('📄 [TableView] paginatedData updated:', {
+        paginatedLength: this.paginatedData.length,
+        sampleRecord: this.paginatedData.length > 0 ? this.paginatedData[0] : null
+      });
       this.cdr.markForCheck();
     } catch (error: any) {
       console.error('❌ updatePagination - error:', error);
@@ -1135,6 +1134,7 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     this.updatePagination();
     
     // Focus the first editable field after a short delay
+    // This ensures Tab navigation starts from the first field
     setTimeout(() => {
       if (newRecord) {
         const editableColumn = this.table.columns.find(col => !col.isAutoIncrement && !col.isAutoGenerate && !col.isPrimaryKey);
@@ -1145,8 +1145,9 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
             ) as HTMLInputElement;
             if (inputElement) {
               inputElement.focus();
+              inputElement.select();
             }
-          }, 100);
+          }, 150);
         }
       }
     }, 100);
@@ -1216,16 +1217,133 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     this.tableEditService.clearSelection();
   }
 
-  onDeleteRow = (event: {rowIndex: number, element: any}) => {
-    const { rowIndex, element } = event;
+  onDeleteColumn = async (event: {columnId: string, columnName: string}) => {
+    const { columnId, columnName } = event;
     
-    // Don't delete temporary records this way
-    if (element._isTemporary) {
+    console.log('🗑️ [TableView] onDeleteColumn called:', { columnId, columnName });
+    
+    // Find the column to verify it can be deleted
+    const column = this.table?.columns?.find(col => col.id === columnId);
+    if (!column) {
+      console.error('❌ [TableView] Column not found:', columnId);
+      this.notificationService.showError('Column not found');
       return;
     }
     
+    // Double-check: don't allow deleting id or primary key columns
+    if (column.name === 'id' || column.isPrimaryKey || column.isAutoGenerate || column.isAutoIncrement) {
+      console.warn('⚠️ [TableView] Cannot delete system column:', column.name);
+      this.notificationService.showWarning('Cannot delete system columns (id, primary keys, etc.)');
+      return;
+    }
+    
+    // Show confirmation dialog
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      width: '400px',
+      data: {
+        title: 'Delete Column',
+        message: `Are you sure you want to delete the column "${columnName}"? This action cannot be undone and will remove all data in this column.`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        isDangerous: true
+      }
+    });
+    
+    const result = await dialogRef.afterClosed().toPromise();
+    
+    if (!result) {
+      console.log('🚫 [TableView] Column deletion cancelled');
+      return;
+    }
+    
+    console.log('✅ [TableView] Confirmed deletion, proceeding...');
+    
+    // Get current project
+    const currentProject = this.projectService.getCurrentProject()();
+    if (!currentProject) {
+      console.error('❌ [TableView] No current project found');
+      this.notificationService.showError('No project found');
+      return;
+    }
+    
+    // Create new table structure without the column
+    const updatedTable: Table = {
+      ...this.table,
+      columns: this.table.columns.filter(col => col.id !== columnId)
+    };
+    
+    // Apply the schema change
+    try {
+      await this.schemaChangeHandler.applyTableEdits(
+        currentProject.id,
+        this.table,
+        updatedTable,
+        currentProject.schemaData.tables || [],
+        currentProject.schemaData.relationships || [],
+        currentProject.schemaData.relationshipDisplayColumns || []
+      );
+      
+      console.log('✅ [TableView] Column deleted successfully');
+      this.notificationService.showSuccess(`Column "${columnName}" deleted successfully`);
+    } catch (error: any) {
+      console.error('❌ [TableView] Failed to delete column:', error);
+      this.notificationService.showError(`Failed to delete column: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  onDeleteRow = (event: {rowIndex: number, element: any}) => {
+    const { rowIndex, element } = event;
+    
+    console.log('🗑️ [TableView] onDeleteRow called:', { 
+      rowIndex, 
+      element, 
+      hasId: !!element?.id, 
+      id: element?.id,
+      elementKeys: Object.keys(element || {}),
+      tableColumns: this.table?.columns?.map(c => ({ name: c.name, isPrimaryKey: c.isPrimaryKey, internalName: c.internal_name }))
+    });
+    
+    // Don't delete temporary records this way
+    if (element._isTemporary) {
+      console.log('⚠️ [TableView] Skipping delete - record is temporary');
+      return;
+    }
+    
+    // Try to find the id from the primary key column if id is not directly available
+    let recordId = element?.id;
+    
+    if (!recordId) {
+      // Find primary key column
+      const primaryKeyColumn = this.table?.columns?.find(col => col.isPrimaryKey);
+      if (primaryKeyColumn) {
+        // Try to get id from the primary key column's display name
+        recordId = element[primaryKeyColumn.name];
+        console.log(`🔍 [TableView] Found id from primary key column "${primaryKeyColumn.name}":`, recordId);
+      }
+    }
+    
+    // Check if element has an id
+    if (!recordId) {
+      console.error('❌ [TableView] Cannot delete record - no id found:', {
+        element,
+        elementKeys: Object.keys(element || {}),
+        primaryKeyColumn: this.table?.columns?.find(col => col.isPrimaryKey)
+      });
+      this.notificationService.showError('Cannot delete record: missing record ID');
+      return;
+    }
+    
+    // Create element with id for delete event
+    const elementWithId = { ...element, id: recordId };
+    
+    // Prepare delete event
+    const deleteEvent = this.tableDataService.prepareDeleteEvent(this.table, elementWithId);
+    console.log('📤 [TableView] Emitting delete event:', deleteEvent);
+    
     // Emit delete event - realtime will handle removal
-    this.dataChanged.emit(this.tableDataService.prepareDeleteEvent(this.table, element));
+    this.dataChanged.emit(deleteEvent);
+    
+    console.log('✅ [TableView] Delete event emitted successfully');
   };
 
   onEditSchema = () => {
@@ -1275,11 +1393,114 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     });
   }
 
-  onColumnDrop(event: CdkDragDrop<any[]>) {
+  async onColumnDrop(event: CdkDragDrop<any[]>) {
     // Set flag to prevent effect from recalculating during reorder
     this.isReorderingColumns = true;
     
     try {
+      // Check if order actually changed
+      if (event.previousIndex === event.currentIndex) {
+        console.log('ℹ️ [TableView] Column dropped at same position, no change needed');
+        return;
+      }
+      
+      if (!this.table) {
+        console.warn('⚠️ [TableView] No table available for column reorder');
+        return;
+      }
+      
+      // Get the column that was moved BEFORE updating the view
+      const movedColumn = this.regularColumns[event.previousIndex];
+      
+      if (!movedColumn) {
+        console.warn('⚠️ [TableView] Could not find moved column at previous index:', event.previousIndex);
+        return;
+      }
+      
+      console.log('🔄 [TableView] Column drag and drop detected:', {
+        movedColumn: movedColumn.name,
+        movedColumnId: movedColumn.id,
+        fromIndex: event.previousIndex,
+        toIndex: event.currentIndex
+      });
+      
+      // Get current order of regularColumns (before update)
+      const currentRegularColumnIds = this.regularColumns.map(col => col.id);
+      
+      // Calculate the new order after the drop
+      const newRegularColumnIds = [...currentRegularColumnIds];
+      const [movedId] = newRegularColumnIds.splice(event.previousIndex, 1);
+      newRegularColumnIds.splice(event.currentIndex, 0, movedId);
+      
+      console.log('🔄 [TableView] Regular columns order:', {
+        old: currentRegularColumnIds,
+        new: newRegularColumnIds
+      });
+      
+      // Now map this to table.columns order
+      // We need to reorder table.columns to match the new regularColumns order
+      // The order in table.columns should reflect the order in regularColumns
+      
+      // Get all column IDs from table.columns (including system columns like id)
+      const tableColumnIds = this.table.columns.map(col => col.id);
+      
+      // Find the position of regular columns in table.columns
+      // We want to maintain the relative order of regular columns as they appear in regularColumns
+      // System columns (like id) should stay in their original positions
+      
+      // Separate system columns (id) from regular columns
+      const systemColumns = this.table.columns.filter(col => col.name === 'id' && col.isPrimaryKey);
+      const regularTableColumns = this.table.columns.filter(col => !(col.name === 'id' && col.isPrimaryKey));
+      
+      // Reorder regularTableColumns to match newRegularColumnIds order
+      const reorderedRegularColumns = newRegularColumnIds
+        .map(id => regularTableColumns.find(col => col.id === id))
+        .filter(col => col !== undefined) as TableColumn[];
+      
+      // Reconstruct table.columns: system columns first, then reordered regular columns
+      const reorderedColumns = [...systemColumns, ...reorderedRegularColumns];
+      
+      // Check if order actually changed by comparing column IDs
+      const oldColumnIds = this.table.columns.map(col => col.id);
+      const newColumnIds = reorderedColumns.map(col => col.id);
+      
+      const orderChanged = oldColumnIds.some((id, index) => id !== newColumnIds[index]);
+      
+      if (!orderChanged) {
+        console.log('ℹ️ [TableView] Column order unchanged in table.columns, skipping schema update');
+        // Still update the view even if schema doesn't change
+        this.viewManagerService.handleColumnDrop(
+          event,
+          this.regularColumns,
+          this.activeView,
+          this.table,
+          (view) => this.viewUpdated.emit(view),
+          (regularColumns, relationshipColumns) => {
+            this.regularColumns = regularColumns;
+            this.relationshipColumns = relationshipColumns;
+          }
+        );
+        return;
+      }
+      
+      // Create updated table with new column order
+      const updatedTable: Table = {
+        ...this.table,
+        columns: reorderedColumns
+      };
+      
+      // Get current project
+      const currentProject = this.projectService.getCurrentProject()();
+      if (!currentProject) {
+        console.error('❌ [TableView] No current project found');
+        return;
+      }
+      
+      console.log('🔄 [TableView] Column order changed, updating schema...');
+      console.log('🔄 [TableView] Old order:', this.table.columns.map(c => ({ id: c.id, name: c.name })));
+      console.log('🔄 [TableView] New order:', updatedTable.columns.map(c => ({ id: c.id, name: c.name })));
+      
+      // First, update the view (for immediate UI feedback)
       this.viewManagerService.handleColumnDrop(
         event,
         this.regularColumns,
@@ -1292,9 +1513,23 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
         }
       );
       
+      // Apply schema change to persist the new column order
+      // This will use a no-op change since only order changed (no DDL changes)
+      await this.schemaChangeHandler.applyTableEdits(
+        currentProject.id,
+        this.table,
+        updatedTable,
+        currentProject.schemaData.tables || [],
+        currentProject.schemaData.relationships || [],
+        currentProject.schemaData.relationshipDisplayColumns || []
+      );
+      
+      console.log('✅ [TableView] Column order updated in schema');
+      
       this.updatePagination();
     } catch (error: any) {
-      // Error handled by viewManagerService
+      console.error('❌ [TableView] Error reordering columns:', error);
+      this.notificationService.showError(`Failed to reorder columns: ${error.message || 'Unknown error'}`);
     } finally {
       // Reset flag after a short delay to allow the emit to complete
       setTimeout(() => {
@@ -1396,22 +1631,52 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
     this.applyFiltersAndSort();
   }
 
-  private applyFiltersAndSort(): void {
+  private async applyFiltersAndSort(): Promise<void> {
     try {
       // Get current table data
       let data = this.tableData();
+      console.log('🔍 [TableView] applyFiltersAndSort called with data length:', data.length);
       
-      // Apply search filter first
-      const searchQuery = this.searchQuery().toLowerCase().trim();
+      // Apply search filter - use server-side search if query exists
+      const searchQuery = this.searchQuery().trim();
       if (searchQuery) {
-        data = data.filter(record => {
-          // Search across all column values
-          return this.table.columns.some(column => {
-            const value = record[column.name];
-            if (value === null || value === undefined) return false;
-            return String(value).toLowerCase().includes(searchQuery);
+        try {
+          // Get organizationId from project
+          const project = this.projectService.getCurrentProjectSync();
+          if (!project || !project.organizationId) {
+            console.warn('⚠️ [TableView] Cannot search: no project or organizationId');
+            // Fallback to client-side search
+            data = data.filter(record => {
+              return this.table.columns.some(column => {
+                const value = record[column.name];
+                if (value === null || value === undefined) return false;
+                return String(value).toLowerCase().includes(searchQuery.toLowerCase());
+              });
+            });
+          } else {
+            // Use server-side search (more efficient)
+            console.log('🔍 [TableView] Using server-side search:', searchQuery);
+            const searchResults = await this.slaveDataService.searchTableData(
+              project.organizationId,
+              this.table,
+              searchQuery,
+              this.pageSize,
+              this.currentPage * this.pageSize
+            );
+            data = searchResults;
+            console.log(`✅ [TableView] Server search returned ${data.length} results`);
+          }
+        } catch (searchError: any) {
+          console.error('❌ [TableView] Server search failed, falling back to client-side:', searchError);
+          // Fallback to client-side search if server search fails
+          data = data.filter(record => {
+            return this.table.columns.some(column => {
+              const value = record[column.name];
+              if (value === null || value === undefined) return false;
+              return String(value).toLowerCase().includes(searchQuery.toLowerCase());
+            });
           });
-        });
+        }
       }
       
       // Apply filters and sort to table data
@@ -1423,6 +1688,7 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
         : processedData;
       
       // Update filtered data signal
+      console.log('✅ [TableView] Setting filteredData with length:', finalData.length);
       this.filteredData.set(finalData);
       
       // Don't reset page when filters change if we have a temporary record
@@ -1431,6 +1697,7 @@ export class TableViewComponent implements OnInit, OnChanges, AfterViewInit {
       }
       
       this.updatePagination();
+      console.log('✅ [TableView] Pagination updated, filteredData length:', this.filteredData().length);
     } catch (error: any) {
       console.error('❌ applyFiltersAndSort - ERROR:', error);
       throw error;
